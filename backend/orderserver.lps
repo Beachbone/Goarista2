@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectSession>
+    <PathDelim Value="\"/>
+    <Version Value="12"/>
+    <BuildModes Active="Default"/>
+    <Units>
+      <Unit>
+        <Filename Value="orderserver.lpr"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="OrderServer"/>
+        <IsVisibleTab Value="True"/>
+        <TopLine Value="603"/>
+        <CursorPos X="41" Y="626"/>
+        <UsageCount Value="171"/>
+        <Loaded Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="C:\Lazarus_goa\config_lazarus\onlinepackagemanager\packages\zeosdbo\src\dbc\ZDbcSqLite.pas"/>
+        <EditorIndex Value="1"/>
+        <TopLine Value="720"/>
+        <CursorPos Y="740"/>
+        <UsageCount Value="38"/>
+        <Loaded Value="True"/>
+        <DefaultSyntaxHighlighter Value="Delphi"/>
+      </Unit>
+    </Units>
+    <JumpHistory HistoryIndex="29">
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="640" Column="27" TopLine="612"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="639" TopLine="618"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1300" Column="61" TopLine="1239"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1766" Column="5" TopLine="1726"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="962" Column="49" TopLine="923"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="979" Column="96" TopLine="959"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1787" Column="88" TopLine="1753"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1789" Column="40" TopLine="1755"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1883" Column="54" TopLine="1849"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2290" Column="39" TopLine="2256"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2424" Column="40" TopLine="2391"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="54" Column="36" TopLine="32"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="570" Column="56" TopLine="541"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="698" Column="65" TopLine="675"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="886" Column="56" TopLine="898"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1787" Column="88" TopLine="1753"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1789" Column="40" TopLine="1755"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1883" Column="54" TopLine="1849"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2290" Column="39" TopLine="2256"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2424" Column="40" TopLine="2391"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="54" Column="36" TopLine="33"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="622" Column="142" TopLine="611"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2344" Column="38" TopLine="2313"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2347" Column="35" TopLine="2313"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="948" Column="62" TopLine="963"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1225" Column="5" TopLine="1185"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1860" Column="101" TopLine="1837"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="622" Column="70" TopLine="607"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="802" Column="56" TopLine="796"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1011" Column="62" TopLine="978"/>
+      </Position>
+    </JumpHistory>
+    <RunParams>
+      <FormatVersion Value="2"/>
+      <Modes ActiveMode=""/>
+    </RunParams>
+    <HistoryLists>
+      <List Name="LaunchingApplication" Type="File" Count="1">
+        <Item1 Value="C:\WINDOWS\system32\cmd.exe /C ${TargetCmdLine}"/>
+      </List>
+    </HistoryLists>
+  </ProjectSession>
+</CONFIG>

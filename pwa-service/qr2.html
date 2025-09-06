@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR-Order">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a1a">
+    <title>QR Bestellungssystem - Service</title>
+    
+    <!-- PWA Icons -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%233b82f6'/%3E%3Ctext y='70' font-size='70' text-anchor='middle' x='50' fill='white'%3EQ%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%233b82f6' rx='20'/%3E%3Ctext y='130' font-size='120' text-anchor='middle' x='90' fill='white'%3EQ%3C/text%3E%3C/svg%3E">
+    
+    <!-- PWA Manifest -->
+    <script id="manifest-data" type="application/json">
+    {
+        "name": "QR Bestellungssystem - Service",
+        "short_name": "QR-Service",
+        "start_url": "./",
+        "display": "standalone",
+        "background_color": "#1a1a1a",
+        "theme_color": "#1a1a1a",
+        "orientation": "portrait-primary",
+        "scope": "./",
+        "icons": [
+            {
+                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%233b82f6' rx='20'/%3E%3Ctext y='140' font-size='120' text-anchor='middle' x='96' fill='white'%3ES%3C/text%3E%3C/svg%3E",
+                "sizes": "192x192",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            },
+            {
+                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%233b82f6' rx='50'/%3E%3Ctext y='360' font-size='300' text-anchor='middle' x='256' fill='white'%3ES%3C/text%3E%3C/svg%3E",
+                "sizes": "512x512",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            }
+        ]
+    }
+    </script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --vh: 1vh;
+            --primary-color: #3b82f6;
+            --success-color: #22c55e;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            height: 100vh;
+            height: calc(var(--vh, 1vh) * 100);
+            overflow-x: hidden;
+            position: relative;
+            margin: 0;
+            padding: 0;
+            touch-action: manipulation;
+        }
+
+        .container {
+            height: 100vh;
+            height: calc(var(--vh, 1vh) * 100);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%);
+        }
+
+        .header {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            z-index: 10;
+            padding-top: max(20px, env(safe-area-inset-top) + 10px);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            background: linear-gradient(45deg, var(--primary-color), #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--danger-color);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.online {
+            background: var(--success-color);
+        }
+
+        .current-table {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 12px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .current-table.active {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.3);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding-bottom: max(20px, env(safe-area-inset-bottom) + 20px);
+        }
+
+        .mode-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            color: white;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            min-height: 80px;
+            touch-action: manipulation;
+        }
+
+        .mode-btn:hover, .mode-btn:active {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(59, 130, 246, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .mode-btn.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--primary-color);
+        }
+
+        .mode-btn svg {
+            width: 40px;
+            height: 40px;
+            stroke: var(--primary-color);
+        }
+
+        .table-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 15px;
+            animation: fadeIn 0.5s ease;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .loading::after {
+            content: '';
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .table-item {
+            aspect-ratio: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            touch-action: manipulation;
+            min-height: 60px;
+        }
+
+        .table-item::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .table-item:hover::before, .table-item:active::before {
+            width: 150%;
+            height: 150%;
+        }
+
+        .table-item:hover, .table-item:active {
+            border-color: rgba(59, 130, 246, 0.5);
+            transform: scale(1.05);
+        }
+
+        .table-item.selected {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: var(--success-color);
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin: 10px 0;
+            color: #fecaca;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .scanner-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: none;
+            z-index: 1000;
+            flex-direction: column;
+        }
+
+        .scanner-container.active {
+            display: flex;
+        }
+
+        .scanner-header {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: max(20px, env(safe-area-inset-top) + 10px);
+        }
+
+        .scanner-view {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #scanner {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .scanner-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 250px;
+            height: 250px;
+            border: 3px solid rgba(59, 130, 246, 0.5);
+            border-radius: 20px;
+            animation: scan 2s infinite;
+        }
+
+        @keyframes scan {
+            0%, 100% { border-color: rgba(59, 130, 246, 0.5); }
+            50% { border-color: rgba(59, 130, 246, 1); }
+        }
+
+        .action-button {
+            background: linear-gradient(135deg, var(--primary-color), #8b5cf6);
+            color: white;
+            border: none;
+            padding: 18px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            touch-action: manipulation;
+            min-height: 56px;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .action-button:hover, .action-button:active {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .action-button:active {
+            transform: translateY(0);
+        }
+
+        .action-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .close-button {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: var(--danger-color);
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            touch-action: manipulation;
+            min-height: 44px;
+        }
+
+        .close-button:hover, .close-button:active {
+            background: rgba(239, 68, 68, 0.3);
+        }
+
+        .order-confirmation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: none;
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .order-confirmation.active {
+            display: flex;
+        }
+
+        .confirmation-card {
+            background: #1a1a1a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 400px;
+            width: 100%;
+            animation: slideUp 0.3s ease;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .confirmation-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .order-details {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .order-info {
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .note-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            color: white;
+            margin-bottom: 20px;
+            min-height: 80px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .note-input:focus {
+            outline: none;
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+
+        .confirmation-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .confirmation-actions button {
+            flex: 1;
+            min-height: 48px;
+        }
+
+        .success-animation {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(34, 197, 94, 0.95);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            display: none;
+            z-index: 3000;
+            animation: successPop 0.5s ease;
+        }
+
+        @keyframes successPop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        .timer {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .timer.active {
+            display: block;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            .table-grid {
+                grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+                gap: 12px;
+            }
+            
+            .scanner-overlay {
+                width: 200px;
+                height: 200px;
+            }
+            
+            .confirmation-card {
+                padding: 20px;
+                margin: 10px;
+            }
+        }
+
+        /* PWA and Fullscreen specific styles */
+        @media (display-mode: standalone) {
+            body {
+                padding: 0;
+                overflow: hidden;
+            }
+            
+            .container {
+                height: 100vh;
+                height: 100svh;
+                min-height: 100vh;
+                min-height: 100svh;
+            }
+            
+            .content {
+                padding-bottom: 40px;
+            }
+        }
+
+        @media screen and (max-device-width: 768px) {
+            body {
+                min-height: -webkit-fill-available;
+                min-height: fill-available;
+            }
+            
+            .container {
+                min-height: -webkit-fill-available;
+                min-height: fill-available;
+            }
+        }
+
+        @media (orientation: landscape) and (max-height: 500px) {
+            .header {
+                padding: 10px 20px;
+            }
+            
+            .header h1 {
+                font-size: 20px;
+                margin-bottom: 5px;
+            }
+            
+            .mode-btn {
+                padding: 15px;
+                min-height: 60px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>QR Service-App</h1>
+            <div class="connection-status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Verbinde zum Server...</span>
+                <!-- API URL Button wird dynamisch hinzugefügt wenn offline -->
+            </div>
+            <div class="current-table" id="currentTableDisplay">
+                <span>Kein Tisch ausgewählt</span>
+                <div class="timer" id="timer"></div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="error-message" id="errorMessage"></div>
+
+            <div class="mode-selector">
+                <button class="mode-btn" onclick="selectMode('layout')">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    </svg>
+                    <span>Tischlayout</span>
+                </button>
+                <button class="mode-btn" onclick="selectMode('scan')">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+                        <rect x="7" y="7" width="10" height="10" rx="1"/>
+                    </svg>
+                    <span>QR Scanner</span>
+                </button>
+            </div>
+
+            <div id="tableLayout" class="table-grid" style="display: none;">
+                <!-- Tische werden hier dynamisch geladen -->
+            </div>
+
+            <div id="actionArea" style="display: none;">
+                <button class="action-button" onclick="startOrderScan()" id="orderScanBtn">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 20px; height: 20px;">
+                        <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+                        <rect x="7" y="7" width="10" height="10" rx="1"/>
+                    </svg>
+                    Bestellung scannen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scanner Container -->
+    <div class="scanner-container" id="scannerContainer">
+        <div class="scanner-header">
+            <h2 id="scannerTitle">QR Code scannen</h2>
+            <button class="close-button" onclick="closeScanner()">Abbrechen</button>
+        </div>
+        <div class="scanner-view">
+            <video id="scanner"></video>
+            <div class="scanner-overlay"></div>
+        </div>
+    </div>
+
+    <!-- Order Confirmation -->
+    <div class="order-confirmation" id="orderConfirmation">
+        <div class="confirmation-card">
+            <div class="confirmation-header">
+                <h2>Bestellung zuordnen</h2>
+            </div>
+            <div class="order-details">
+                <div class="order-info">
+                    <span>Tisch:</span>
+                    <strong id="confirmTableNumber"></strong>
+                </div>
+                <div class="order-info">
+                    <span>Bestellnummer:</span>
+                    <strong id="confirmOrderNumber"></strong>
+                </div>
+            </div>
+            <textarea class="note-input" id="orderNote" placeholder="Optionale Notiz für die Küche..."></textarea>
+            <div class="confirmation-actions">
+                <button class="close-button" onclick="cancelOrder()">Abbrechen</button>
+                <button class="action-button" onclick="confirmOrder()" id="confirmBtn">
+                    Tisch zuordnen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Animation -->
+    <div class="success-animation" id="successAnimation">
+        ✓ Tisch erfolgreich zugeordnet!
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@0.19.1"></script>
+    <script>
+        // Configuration - kann zur Laufzeit geändert werden
+        const config = {
+            apiBaseUrl: localStorage.getItem('apiBaseUrl') || 'http://localhost:8080/api',
+            timeoutDuration: 300000, // 5 Minuten
+            retryAttempts: 3,
+            retryDelay: 1000
+        };
+
+        // URL-Konfiguration am Anfang der App
+        function showConfigDialog() {
+            const currentUrl = config.apiBaseUrl;
+            const newUrl = prompt('Backend-URL eingeben:', currentUrl);
+            if (newUrl && newUrl !== currentUrl) {
+                config.apiBaseUrl = newUrl;
+                localStorage.setItem('apiBaseUrl', newUrl);
+                location.reload(); // App neu laden
+            }
+        }
+
+        // Debug: Aktuelle URL anzeigen
+        console.log('Backend URL:', config.apiBaseUrl);
+
+        // State Management
+        let state = {
+            mode: null,
+            selectedTable: null,
+            currentOrder: null,
+            scanner: null,
+            scanType: null,
+            timeout: null,
+            isOnline: false,
+            tables: []
+        };
+
+        // API Functions
+        async function apiCall(endpoint, options = {}) {
+            const url = `${config.apiBaseUrl}${endpoint}`;
+            const defaultOptions = {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                ...options
+            };
+
+            for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
+                try {
+                    const response = await fetch(url, defaultOptions);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    updateConnectionStatus(true);
+                    return data;
+                } catch (error) {
+                    console.error(`API call attempt ${attempt} failed:`, error);
+                    
+                    if (attempt === config.retryAttempts) {
+                        updateConnectionStatus(false);
+                        throw error;
+                    }
+                    
+                    // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, config.retryDelay * attempt));
+                }
+            }
+        }
+
+        async function loadTables() {
+            try {
+                showLoading(true);
+                const tables = await apiCall('/tables');
+                state.tables = tables;
+                renderTables(tables);
+                hideError();
+            } catch (error) {
+                console.error('Failed to load tables:', error);
+                showError(`Fehler beim Laden der Tische: ${error.message}`);
+                // Fallback zu lokalen Testtischen
+                const fallbackTables = [
+                    { table_number: "1", table_name: "Tisch 1" },
+                    { table_number: "2", table_name: "Tisch 2" },
+                    { table_number: "3", table_name: "Tisch 3" },
+                    { table_number: "4", table_name: "Tisch 4" },
+                    { table_number: "5", table_name: "Tisch 5" },
+                    { table_number: "takeaway", table_name: "Take-Away" }
+                ];
+                state.tables = fallbackTables;
+                renderTables(fallbackTables);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function createOrder(orderData) {
+            try {
+                const result = await apiCall('/orders', {
+                    method: 'POST',
+                    body: JSON.stringify(orderData)
+                });
+                return result;
+            } catch (error) {
+                console.error('Failed to create order:', error);
+                throw error;
+            }
+        }
+
+        // UI Helper Functions
+        function updateConnectionStatus(isOnline) {
+            state.isOnline = isOnline;
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const connectionDiv = document.querySelector('.connection-status');
+            
+            if (isOnline) {
+                statusDot.classList.add('online');
+                statusText.textContent = 'Verbunden';
+                // Entferne API-Button wenn online
+                const apiButton = connectionDiv.querySelector('.api-config-btn');
+                if (apiButton) apiButton.remove();
+            } else {
+                statusDot.classList.remove('online');
+                statusText.textContent = 'Offline';
+                // Füge API-Button hinzu wenn offline
+                if (!connectionDiv.querySelector('.api-config-btn')) {
+                    const apiButton = document.createElement('button');
+                    apiButton.className = 'api-config-btn';
+                    apiButton.textContent = 'API URL';
+                    apiButton.onclick = showConfigDialog;
+                    apiButton.style.cssText = 'margin-left: 10px; padding: 2px 8px; font-size: 11px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 4px; cursor: pointer;';
+                    connectionDiv.appendChild(apiButton);
+                }
+            }
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.classList.add('show');
+            setTimeout(() => {
+                errorEl.classList.remove('show');
+            }, 5000);
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').classList.remove('show');
+        }
+
+        function showLoading(show) {
+            const layoutDiv = document.getElementById('tableLayout');
+            if (show) {
+                layoutDiv.innerHTML = '<div class="loading">Lade Tische...</div>';
+                layoutDiv.style.display = 'block';
+            } else {
+                if (layoutDiv.querySelector('.loading')) {
+                    layoutDiv.innerHTML = '';
+                }
+            }
+        }
+
+        function renderTables(tables) {
+            const layoutDiv = document.getElementById('tableLayout');
+            layoutDiv.innerHTML = '';
+            layoutDiv.style.display = 'grid';
+
+            if (!tables || tables.length === 0) {
+                layoutDiv.innerHTML = '<div class="loading">Keine Tische verfügbar</div>';
+                return;
+            }
+
+            tables.forEach(table => {
+                const tableElement = document.createElement('div');
+                tableElement.className = 'table-item';
+                tableElement.textContent = table.table_name || table.table_number;
+                tableElement.onclick = () => selectTable(table.table_number);
+                layoutDiv.appendChild(tableElement);
+            });
+        }
+
+        // Mode Selection
+        function selectMode(mode) {
+            state.mode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.closest('.mode-btn').classList.add('active');
+
+            if (mode === 'layout') {
+                loadTableLayout();
+            } else if (mode === 'scan') {
+                startTableScan();
+            }
+        }
+
+        // Load Table Layout
+        function loadTableLayout() {
+            if (state.tables.length === 0) {
+                loadTables();
+            } else {
+                renderTables(state.tables);
+            }
+        }
+
+        // Select Table
+        function selectTable(tableNumber) {
+            state.selectedTable = tableNumber;
+            
+            // Update UI
+            document.querySelectorAll('.table-item').forEach(item => {
+                item.classList.remove('selected');
+                if (item.textContent.includes(tableNumber)) {
+                    item.classList.add('selected');
+                }
+            });
+
+            updateCurrentTableDisplay();
+            startTableTimer();
+            
+            // Show action area
+            document.getElementById('actionArea').style.display = 'block';
+            
+            // Scroll to action button on small screens
+            setTimeout(() => {
+                document.getElementById('actionArea').scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'end' 
+                });
+            }, 100);
+        }
+
+        // Update Current Table Display
+        function updateCurrentTableDisplay() {
+            const display = document.getElementById('currentTableDisplay');
+            if (state.selectedTable) {
+                const tableInfo = state.tables.find(t => t.table_number === state.selectedTable);
+                const tableName = tableInfo ? tableInfo.table_name : `Tisch ${state.selectedTable}`;
+                
+                display.innerHTML = `
+                    <span>${tableName}</span>
+                    <button class="close-button" style="padding: 5px 10px; font-size: 12px;" onclick="clearTable()">×</button>
+                    <div class="timer" id="timer"></div>
+                `;
+                display.classList.add('active');
+            } else {
+                display.innerHTML = '<span>Kein Tisch ausgewählt</span>';
+                display.classList.remove('active');
+            }
+        }
+
+        // Clear Table Selection
+        function clearTable() {
+            state.selectedTable = null;
+            clearTimeout(state.timeout);
+            document.querySelectorAll('.table-item').forEach(item => item.classList.remove('selected'));
+            document.getElementById('actionArea').style.display = 'none';
+            updateCurrentTableDisplay();
+        }
+
+        // Timer Management
+        function startTableTimer() {
+            clearTimeout(state.timeout);
+            const timerElement = document.getElementById('timer');
+            let remainingTime = config.timeoutDuration / 1000;
+
+            if (timerElement) {
+                timerElement.classList.add('active');
+                updateTimer();
+            }
+
+            function updateTimer() {
+                if (remainingTime > 0 && state.selectedTable) {
+                    const minutes = Math.floor(remainingTime / 60);
+                    const seconds = remainingTime % 60;
+                    if (timerElement) {
+                        timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    }
+                    remainingTime--;
+                    setTimeout(updateTimer, 1000);
+                } else if (remainingTime === 0) {
+                    clearTable();
+                }
+            }
+
+            state.timeout = setTimeout(() => {
+                clearTable();
+            }, config.timeoutDuration);
+        }
+
+        // Scanner Functions
+        function startTableScan() {
+            state.scanType = 'table';
+            document.getElementById('scannerTitle').textContent = 'Tischnummer scannen';
+            openScanner();
+        }
+
+        function startOrderScan() {
+            if (!state.selectedTable) {
+                showError('Bitte wählen Sie zuerst einen Tisch aus!');
+                return;
+            }
+            state.scanType = 'order';
+            document.getElementById('scannerTitle').textContent = 'Bestellung scannen';
+            openScanner();
+        }
+
+        async function openScanner() {
+            document.getElementById('scannerContainer').classList.add('active');
+            
+            // Check if we're on HTTPS or localhost
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                showError('Die Kamera-API benötigt eine sichere Verbindung (HTTPS). Bitte verwenden Sie HTTPS oder localhost.');
+                closeScanner();
+                return;
+            }
+
+            try {
+                // First check if camera permissions are available
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                stream.getTracks().forEach(track => track.stop()); // Stop test stream
+                
+                const codeReader = new ZXing.BrowserQRCodeReader();
+                state.scanner = codeReader;
+
+                const videoDevices = await codeReader.listVideoInputDevices();
+                if (videoDevices.length === 0) {
+                    throw new Error('Keine Kamera gefunden');
+                }
+
+                // Prefer back camera on mobile
+                const selectedDevice = videoDevices.find(device => 
+                    device.label.toLowerCase().includes('back') || 
+                    device.label.toLowerCase().includes('environment')
+                ) || videoDevices[0];
+
+                codeReader.decodeFromVideoDevice(selectedDevice.deviceId, 'scanner', (result, err) => {
+                    if (result) {
+                        handleScanResult(result.text);
+                    }
+                    if (err && !(err instanceof ZXing.NotFoundException)) {
+                        console.error('Scan error:', err);
+                    }
+                }).catch(err => {
+                    console.error('Decode error:', err);
+                    showError(`Fehler beim Starten des Scanners: ${err.message}`);
+                    closeScanner();
+                });
+            } catch (err) {
+                console.error('Camera error:', err);
+                let errorMessage = 'Kamera-Fehler: ';
+                
+                if (err.name === 'NotAllowedError') {
+                    errorMessage += 'Kamera-Zugriff wurde verweigert. Bitte erlauben Sie den Zugriff in den Browser-Einstellungen.';
+                } else if (err.name === 'NotFoundError') {
+                    errorMessage += 'Keine Kamera gefunden.';
+                } else if (err.name === 'NotReadableError') {
+                    errorMessage += 'Kamera wird bereits verwendet.';
+                } else if (err.name === 'SecurityError') {
+                    errorMessage += 'Sicherheitsfehler - HTTPS erforderlich.';
+                } else {
+                    errorMessage += err.message;
+                }
+                
+                showError(errorMessage);
+                closeScanner();
+            }
+        }
+
+        function closeScanner() {
+            if (state.scanner) {
+                state.scanner.reset();
+                state.scanner = null;
+            }
+            document.getElementById('scannerContainer').classList.remove('active');
+        }
+
+        function handleScanResult(data) {
+            closeScanner();
+
+            if (state.scanType === 'table') {
+                // Parse table number from QR code
+                let tableNumber = null;
+                
+                try {
+                    // Try JSON format first: {"order":"20250819-001","type":"order_qr"}
+                    const parsed = JSON.parse(data);
+                    if (parsed.table) {
+                        tableNumber = parsed.table;
+                    }
+                } catch (e) {
+                    // Try simple table:X format
+                    const tableMatch = data.match(/table:(\w+)/i);
+                    if (tableMatch) {
+                        tableNumber = tableMatch[1];
+                    } else {
+                        // Fallback: assume the whole string is table number
+                        tableNumber = data;
+                    }
+                }
+                
+                if (tableNumber && state.tables.find(t => t.table_number === tableNumber)) {
+                    selectTable(tableNumber);
+                    document.getElementById('actionArea').style.display = 'block';
+                } else {
+                    showError('Ungültiger Tisch-QR-Code oder Tisch nicht gefunden!');
+                }
+            } else if (state.scanType === 'order') {
+                // Parse order data from QR code
+                try {
+                    const orderData = JSON.parse(data);
+                    if (orderData.order || orderData.order_number) {
+                        state.currentOrder = orderData;
+                        showOrderConfirmation(orderData);
+                    } else {
+                        throw new Error('Ungültiges QR-Code-Format');
+                    }
+                } catch (e) {
+                    // Fallback for simple order number
+                    state.currentOrder = { order_number: data };
+                    showOrderConfirmation({ order_number: data });
+                }
+            }
+        }
+
+        // Order Confirmation
+        function showOrderConfirmation(orderData) {
+            const tableInfo = state.tables.find(t => t.table_number === state.selectedTable);
+            const tableName = tableInfo ? tableInfo.table_name : `Tisch ${state.selectedTable}`;
+            
+            document.getElementById('confirmTableNumber').textContent = tableName;
+            document.getElementById('confirmOrderNumber').textContent = orderData.order || orderData.order_number || 'N/A';
+            document.getElementById('orderNote').value = '';
+            document.getElementById('orderConfirmation').classList.add('active');
+        }
+
+        function cancelOrder() {
+            document.getElementById('orderConfirmation').classList.remove('active');
+            state.currentOrder = null;
+        }
+
+        async function confirmOrder() {
+            const confirmBtn = document.getElementById('confirmBtn');
+            const note = document.getElementById('orderNote').value;
+            
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Verarbeite...';
+            
+            try {
+                const orderPayload = {
+                    table_number: state.selectedTable,
+                    order_number: state.currentOrder.order || state.currentOrder.order_number,
+                    note: note,
+                    status: 'confirmed',
+                    assigned_at: new Date().toISOString()
+                };
+
+                // Send assignment to backend
+                await createOrder(orderPayload);
+                
+                // Reset timer for next order
+                startTableTimer();
+                
+                // Close confirmation
+                document.getElementById('orderConfirmation').classList.remove('active');
+                
+                // Show success animation
+                showSuccessAnimation();
+                
+                state.currentOrder = null;
+                
+            } catch (error) {
+                console.error('Failed to confirm order:', error);
+                showError(`Fehler beim Zuordnen der Bestellung: ${error.message}`);
+            } finally {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Tisch zuordnen';
+            }
+        }
+
+        function showSuccessAnimation() {
+            const successEl = document.getElementById('successAnimation');
+            successEl.style.display = 'block';
+            setTimeout(() => {
+                successEl.style.display = 'none';
+            }, 2000);
+        }
+
+        // Check server connection on startup
+        async function checkConnection() {
+            try {
+                await apiCall('/health');
+                updateConnectionStatus(true);
+            } catch (error) {
+                console.error('Initial connection failed:', error);
+                updateConnectionStatus(false);
+            }
+        }
+
+        // PWA Installation
+        let deferredPrompt;
+        
+        // Create and inject manifest
+        function createManifest() {
+            const manifestData = document.getElementById('manifest-data').textContent;
+            const manifestBlob = new Blob([manifestData], { type: 'application/json' });
+            const manifestURL = URL.createObjectURL(manifestBlob);
+            
+            const manifestLink = document.createElement('link');
+            manifestLink.rel = 'manifest';
+            manifestLink.href = manifestURL;
+            document.head.appendChild(manifestLink);
+            
+            return manifestURL;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            createManifest();
+            checkConnection();
+        });
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('beforeinstallprompt triggered');
+            e.preventDefault();
+            deferredPrompt = e;
+        });
+
+        // Note: ServiceWorker disabled - requires separate .js file for production
+        // For now, PWA works without offline caching
+        console.log('PWA running without ServiceWorker (requires separate file in production)');
+
+        // Mobile viewport handling
+        function updateViewportHeight() {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+
+        updateViewportHeight();
+        window.addEventListener('resize', updateViewportHeight);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(updateViewportHeight, 100);
+        });
+
+        // Hide address bar on mobile
+        function hideAddressBar() {
+            if (window.innerHeight < window.outerHeight) {
+                setTimeout(() => {
+                    window.scrollTo(0, 1);
+                }, 100);
+            }
+        }
+
+        window.addEventListener('load', hideAddressBar);
+        window.addEventListener('focus', hideAddressBar);
+        window.addEventListener('touchstart', hideAddressBar, { once: true });
+
+        // Handle orientation changes
+        function handleOrientationChange() {
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+            }, 100);
+        }
+
+        window.addEventListener('orientationchange', handleOrientationChange);
+        window.addEventListener('resize', handleOrientationChange);
+
+        // Prevent zoom on double tap
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function (event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+
+        // Touch feedback
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.classList.contains('mode-btn') || 
+                e.target.classList.contains('table-item') || 
+                e.target.classList.contains('action-button')) {
+                e.target.style.opacity = '0.7';
+            }
+        });
+
+        document.addEventListener('touchend', function(e) {
+            if (e.target.classList.contains('mode-btn') || 
+                e.target.classList.contains('table-item') || 
+                e.target.classList.contains('action-button')) {
+                setTimeout(() => {
+                    e.target.style.opacity = '';
+                }, 150);
+            }
+        });
+    </script>
+</body>
+</html>

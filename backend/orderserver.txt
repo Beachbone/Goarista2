@@ -1,0 +1,77 @@
+program OrderServer;
+
+{$mode objfpc}{$H+}
+
+uses
+  {$IFDEF UNIX}
+  cthreads,
+  {$ENDIF}
+  Classes, FileInfo, SysUtils, fphttpapp, httpdefs, httproute, fpjson;
+
+type
+  TSimpleAPIHandler = class
+  public
+    procedure HandleHealth(ARequest: TRequest; AResponse: TResponse);
+  end;
+
+
+procedure TSimpleAPIHandler.HandleHealth(ARequest: TRequest; AResponse: TResponse);
+var
+  HealthObj: TJSONObject;
+
+begin
+  HealthObj := TJSONObject.Create;
+
+
+  try
+    HealthObj.Add('status', 'ok');
+    HealthObj.Add('message', 'Server is running and healthy.');
+    HealthObj.Add('timestamp', DateTimeToStr(Now));
+    HealthObj.Add('platform', {$I %FPCTARGETOS%});
+    HealthObj.Add('version', '0.1.0.0');
+
+    AResponse.ContentType := 'application/json';
+    AResponse.Code := 200;
+    AResponse.Content := HealthObj.AsJSON;
+  finally
+    HealthObj.Free;
+  end;
+end;
+
+var
+  APIHandler: TSimpleAPIHandler;
+begin
+  // Handle Ctrl+C properly on Unix systems
+  {$IFDEF UNIX}
+  ExitCode := 0;
+  Signal(SIGINT, SIG_DFL);
+  {$ENDIF}
+
+  WriteLn('Starting simple REST API server...');
+  WriteLn('Access URL: http://localhost:8080/api/health');
+
+  APIHandler := TSimpleAPIHandler.Create;
+
+  try
+    // Register the route
+    HTTPRouter.RegisterRoute('/api/health', @APIHandler.HandleHealth);
+
+    // Configure and start the server
+    Application.Port := 8080;
+    Application.Threaded := True;
+    Application.Initialize;
+    Application.Run;
+
+  except
+    on E: Exception do
+    begin
+      WriteLn('Server error: ', E.Message);
+      ExitCode := 1;
+    end;
+  end;
+
+  if Assigned(APIHandler) then
+    APIHandler.Free;
+
+  WriteLn('Server stopped.');
+end.

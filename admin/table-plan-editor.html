@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tischplan Editor</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary-color: #64748b;
+            --success-color: #059669;
+            --danger-color: #dc2626;
+            --warning-color: #d97706;
+            --background: #f8fafc;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--background);
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .toolbar {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .canvas-wrapper {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background: var(--background);
+        }
+
+        .canvas {
+            background: var(--surface);
+            border: 2px solid var(--border);
+            cursor: grab;
+            position: relative;
+            margin: 20px;
+        }
+
+        .canvas:active {
+            cursor: grabbing;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgb(37 99 235 / 0.1);
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #047857;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .table-item {
+            background: var(--surface);
+            border: 2px solid var(--primary-color);
+            border-radius: 8px;
+            padding: 2px;
+            margin: 0;
+            cursor: grab;
+            user-select: none;
+            position: absolute;
+            min-width: 15px;
+            min-height: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            font-size: 10px;
+            box-shadow: var(--shadow);
+            transition: box-shadow 0.2s, border-color 0.2s;
+            box-sizing: border-box;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .table-item:active {
+            cursor: grabbing;
+        }
+
+        .table-item:hover {
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .table-item.selected {
+            border-color: var(--warning-color);
+            box-shadow: 0 0 0 3px rgb(217 119 6 / 0.2);
+        }
+
+        .table-item.round {
+            border-radius: 50%;
+        }
+
+        .layout-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .layout-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .layout-item:hover {
+            background: var(--background);
+        }
+
+        .layout-item:last-child {
+            border-bottom: none;
+        }
+
+        .grid-background {
+            background-image: 
+                linear-gradient(to right, #e2e8f0 1px, transparent 1px),
+                linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            gap: 4px;
+            background: var(--surface);
+            padding: 4px;
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+        }
+
+        .coordinates {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            background: var(--surface);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-group input {
+            flex: 1;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="section-title">Raumeinstellungen</div>
+            <div class="form-group">
+                <label for="roomWidth">Raumbreite (m)</label>
+                <input type="number" id="roomWidth" min="1" max="100" step="0.1" value="10">
+            </div>
+            <div class="form-group">
+                <label for="roomHeight">Raumlänge (m)</label>
+                <input type="number" id="roomHeight" min="1" max="100" step="0.1" value="8">
+            </div>
+            <button class="btn btn-primary" id="updateRoom">Raum aktualisieren</button>
+
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border);">
+
+            <div class="section-title">Tisch hinzufügen</div>
+            <div class="form-group">
+                <label for="tableNumber">Tischnummer</label>
+                <input type="text" id="tableNumber" placeholder="T1">
+            </div>
+            <div class="form-group">
+                <label for="tableShape">Form</label>
+                <select id="tableShape">
+                    <option value="rectangle">Rechteckig</option>
+                    <option value="round">Rund</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <div class="form-group">
+                    <label for="tableWidth">Breite (cm)</label>
+                    <input type="number" id="tableWidth" min="30" max="300" value="80">
+                </div>
+                <div class="form-group">
+                    <label for="tableHeight">Höhe (cm)</label>
+                    <input type="number" id="tableHeight" min="30" max="300" value="80">
+                </div>
+            </div>
+            <button class="btn btn-success" id="addTable">Tisch hinzufügen</button>
+
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border);">
+
+            <div class="section-title">Ausgewählter Tisch</div>
+            <div id="selectedTableInfo">
+                <p style="color: var(--text-secondary); font-size: 14px;">Kein Tisch ausgewählt</p>
+            </div>
+            <div id="selectedTableControls" style="display: none;">
+                <div class="form-group">
+                    <label for="selectedTableNumber">Tischnummer</label>
+                    <input type="text" id="selectedTableNumber">
+                </div>
+                <div class="input-group">
+                    <div class="form-group">
+                        <label for="selectedTableWidth">Breite (cm)</label>
+                        <input type="number" id="selectedTableWidth" min="30" max="300">
+                    </div>
+                    <div class="form-group">
+                        <label for="selectedTableHeight">Höhe (cm)</label>
+                        <input type="number" id="selectedTableHeight" min="30" max="300">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="selectedTableRotation">Rotation (°)</label>
+                    <input type="number" id="selectedTableRotation" min="-180" max="180" step="1">
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-primary btn-sm" id="updateSelectedTable">Aktualisieren</button>
+                    <button class="btn btn-secondary btn-sm" id="deleteSelectedTable">Löschen</button>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-success btn-sm" id="copyTableFormat">Format kopieren</button>
+                    <button class="btn btn-success btn-sm" id="pasteTableFormat" disabled>Format einfügen</button>
+                </div>
+            </div>
+
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border);">
+
+            <div class="section-title">Layouts</div>
+            <div class="form-group">
+                <label for="layoutName">Layout Name</label>
+                <input type="text" id="layoutName" placeholder="Hauptsaal Standard">
+            </div>
+            <button class="btn btn-success btn-sm" id="saveLayout">Layout speichern</button>
+            
+            <div class="layout-list" id="layoutList">
+                <!-- Layouts werden hier eingefügt -->
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="toolbar">
+                <button class="btn btn-secondary btn-sm" id="clearCanvas">Alle löschen</button>
+                <button class="btn btn-secondary btn-sm" id="toggleGrid">Raster ein/aus</button>
+                <button class="btn btn-secondary btn-sm" id="toggleCollision">
+                    <span id="collisionText">Kollision: Ein</span>
+                </button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="collisionMargin" style="font-size: 12px; color: var(--text-secondary);">Abstand:</label>
+                    <input type="range" id="collisionMargin" min="0" max="10" value="2" 
+                           style="width: 60px;" title="Kollisions-Abstand in Pixeln">
+                    <span id="marginValue" style="font-size: 12px; color: var(--text-secondary); width: 20px;">2px</span>
+                </div>
+                <span style="margin-left: auto; font-size: 14px; color: var(--text-secondary);">
+                    Maßstab: <span id="scaleInfo">1:100</span> | Zoom: <span id="zoomLevel">100%</span>
+                </span>
+            </div>
+            
+            <div class="canvas-container">
+                <div class="canvas-wrapper" id="canvasWrapper">
+                    <div class="canvas grid-background" id="canvas"></div>
+                </div>
+                
+                <div class="zoom-controls">
+                    <button class="btn btn-secondary btn-sm" id="zoomOut">-</button>
+                    <button class="btn btn-secondary btn-sm" id="zoomReset">Anpassen</button>
+                    <button class="btn btn-secondary btn-sm" id="zoomIn">+</button>
+                </div>
+                
+                <div class="coordinates" id="coordinates">
+                    X: 0m, Y: 0m
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+            // Sicherheits-Utilities
+            class SecurityUtils {
+                static sanitizeInput(input) {
+                    if (typeof input !== 'string') return String(input);
+                    return input
+                        .replace(/[<>'"&]/g, (char) => {
+                            const map = { '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;', '&': '&amp;' };
+                            return map[char];
+                        }) // Diese Klammer schließt die Callback-Funktion korrekt ab.
+                        .trim();
+                }
+
+                static validateNumber(value, min = 0, max = Infinity) {
+                    const num = parseFloat(value);
+                    return !isNaN(num) && num >= min && num <= max ? num : null;
+                }
+
+                static generateId() {
+                    return 'table_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                }
+            }
+
+        // Database API Integration
+        class DatabaseAPI {
+            constructor(baseUrl = './api') {
+                this.baseUrl = baseUrl;
+            }
+
+            async request(endpoint, options = {}) {
+                let url;
+                
+                // Korrekte URL-Konstruktion für verschiedene Endpunkte
+                if (endpoint === '/layouts') {
+                    url = `${this.baseUrl}/layouts.php`;
+                } else if (endpoint.startsWith('/layouts/')) {
+                    // /layouts/4 wird zu layouts.php?id=4
+                    const id = endpoint.split('/')[2];
+                    url = `${this.baseUrl}/layouts.php?id=${id}`;
+                } else {
+                    url = `${this.baseUrl}${endpoint}`;
+                    if (!url.includes('.php')) {
+                        url += '.php';
+                    }
+                }
+                
+                const config = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                };
+
+                try {
+                    const response = await fetch(url, config);
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    return data.data;
+                } catch (error) {
+                    console.error(`API Request failed: ${url}`, error);
+                    throw new Error(`Netzwerkfehler: ${error.message}`);
+                }
+            }
+
+            async getLayouts() { return await this.request('/layouts'); }
+            async getLayout(layoutId) { return await this.request(`/layouts/${layoutId}`); }
+            async saveLayout(layoutData) { return await this.request('/layouts', { method: 'POST', body: JSON.stringify(layoutData) }); }
+            async updateLayout(layoutId, layoutData) { return await this.request(`/layouts/${layoutId}`, { method: 'PUT', body: JSON.stringify(layoutData) }); }
+            async deleteLayout(layoutId) { return await this.request(`/layouts/${layoutId}`, { method: 'DELETE' }); }
+        }
+
+        // Canvas Manager
+        class CanvasManager {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.wrapper = document.getElementById('canvasWrapper');
+                this.baseScale = 50;
+                this.scale = this.baseScale;
+                this.zoom = 1;
+                this.gridEnabled = true;
+                this.roomWidth = 10;
+                this.roomHeight = 8;
+                
+                this.initEventListeners();
+                this.updateCanvasSize(10, 8);
+                
+                window.addEventListener('resize', () => {
+                    setTimeout(() => this.adjustScaleToFit(), 100);
+                });
+            }
+
+            initEventListeners() {
+                const zoomInBtn = document.getElementById('zoomIn');
+                const zoomOutBtn = document.getElementById('zoomOut');
+                const zoomResetBtn = document.getElementById('zoomReset');
+                const toggleGridBtn = document.getElementById('toggleGrid');
+                
+                if (zoomInBtn) zoomInBtn.addEventListener('click', () => this.setZoom(this.zoom * 1.2));
+                if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => this.setZoom(this.zoom / 1.2));
+                if (zoomResetBtn) zoomResetBtn.addEventListener('click', () => this.resetToFit());
+                if (toggleGridBtn) toggleGridBtn.addEventListener('click', () => this.toggleGrid());
+                
+                if (this.canvas) {
+                    this.canvas.addEventListener('mousemove', (e) => this.updateCoordinates(e));
+                }
+            }
+
+            adjustScaleToFit() {
+                if (!this.wrapper) return;
+                
+                const wrapperRect = this.wrapper.getBoundingClientRect();
+                const availableWidth = wrapperRect.width - 40;
+                const availableHeight = wrapperRect.height - 40;
+                
+                if (availableWidth <= 0 || availableHeight <= 0) return;
+                
+                const scaleX = availableWidth / this.roomWidth;
+                const scaleY = availableHeight / this.roomHeight;
+                const optimalScale = Math.min(scaleX, scaleY);
+                
+                this.scale = Math.max(5, Math.min(100, optimalScale * 0.9));
+                this.applyCanvasSize();
+                this.setZoom(1);
+            }
+
+            updateCanvasSize(widthM, heightM) {
+                this.roomWidth = widthM;
+                this.roomHeight = heightM;
+                
+                if (this.wrapper && this.wrapper.getBoundingClientRect().width > 0) {
+                    this.adjustScaleToFit();
+                } else {
+                    this.applyCanvasSize();
+                }
+            }
+
+            applyCanvasSize() {
+                if (!this.canvas) return;
+                
+                const widthPx = this.roomWidth * this.scale;
+                const heightPx = this.roomHeight * this.scale;
+                
+                this.canvas.style.width = widthPx + 'px';
+                this.canvas.style.height = heightPx + 'px';
+                
+                if (this.gridEnabled) {
+                    this.canvas.style.backgroundSize = `${this.scale}px ${this.scale}px`;
+                }
+                
+                this.rescaleAllTables();
+                this.updateScaleInfo();
+            }
+
+            rescaleAllTables() {
+                if (window.tableManager && this.canvas) {
+                    window.tableManager.tables.forEach(table => {
+                        const element = this.canvas.querySelector(`[data-table-id="${table.id}"]`);
+                        if (element) {
+                            window.tableManager.updateTableElement(element, table);
+                        }
+                    });
+                }
+            }
+
+            resetToFit() {
+                this.adjustScaleToFit();
+            }
+
+            setZoom(newZoom) {
+                this.zoom = Math.max(0.1, Math.min(5, newZoom));
+                if (this.canvas) {
+                    this.canvas.style.transform = `scale(${this.zoom})`;
+                    this.canvas.style.transformOrigin = 'top left';
+                }
+                
+                const zoomElement = document.getElementById('zoomLevel');
+                if (zoomElement) {
+                    zoomElement.textContent = Math.round(this.zoom * 100) + '%';
+                }
+                this.updateScaleInfo();
+            }
+
+            updateScaleInfo() {
+                const currentScale = this.scale * this.zoom;
+                const scaleRatio = Math.round(5000 / currentScale);
+                const scaleElement = document.getElementById('scaleInfo');
+                if (scaleElement) {
+                    scaleElement.textContent = `1:${scaleRatio}`;
+                }
+            }
+
+            toggleGrid() {
+                this.gridEnabled = !this.gridEnabled;
+                if (this.canvas) {
+                    this.canvas.classList.toggle('grid-background', this.gridEnabled);
+                    if (this.gridEnabled) {
+                        this.canvas.style.backgroundSize = `${this.scale}px ${this.scale}px`;
+                    }
+                }
+            }
+
+            updateCoordinates(e) {
+                if (!this.canvas) return;
+                
+                const rect = this.canvas.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / this.zoom / this.scale).toFixed(1);
+                const y = ((e.clientY - rect.top) / this.zoom / this.scale).toFixed(1);
+                
+                const coordElement = document.getElementById('coordinates');
+                if (coordElement) {
+                    coordElement.textContent = `X: ${x}m, Y: ${y}m`;
+                }
+            }
+
+            pixelsToMeters(pixels) {
+                return pixels / this.scale;
+            }
+
+            metersToPixels(meters) {
+                return meters * this.scale;
+            }
+        }
+
+        // Table Manager
+        class TableManager {
+            constructor(canvasManager) {
+                this.canvasManager = canvasManager;
+                this.tables = new Map();
+                this.selectedTable = null;
+                this.draggedTable = null;
+                this.dragOffset = { x: 0, y: 0 };
+                this.tempPosition = null; // Temporäre Position während Drag
+                this.copiedFormat = null;
+                this.collisionDetection = true;
+                this.collisionMargin = 2; // Standard: 2px Abstand zwischen Tischen
+                
+                this.initEventListeners();
+            }
+
+            initEventListeners() {
+                const addTableBtn = document.getElementById('addTable');
+                const updateBtn = document.getElementById('updateSelectedTable');
+                const deleteBtn = document.getElementById('deleteSelectedTable');
+                const copyBtn = document.getElementById('copyTableFormat');
+                const pasteBtn = document.getElementById('pasteTableFormat');
+                const collisionBtn = document.getElementById('toggleCollision');
+                
+                if (addTableBtn) addTableBtn.addEventListener('click', () => this.addTable());
+                if (updateBtn) updateBtn.addEventListener('click', () => this.updateSelectedTable());
+                if (deleteBtn) deleteBtn.addEventListener('click', () => this.deleteSelectedTable());
+                if (copyBtn) copyBtn.addEventListener('click', () => this.copyTableFormat());
+                if (pasteBtn) pasteBtn.addEventListener('click', () => this.pasteTableFormat());
+                if (collisionBtn) collisionBtn.addEventListener('click', () => this.toggleCollisionDetection());
+                
+                if (this.canvasManager.canvas) {
+                    this.canvasManager.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                }
+                
+                document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                document.addEventListener('mouseup', () => this.handleMouseUp());
+                
+                // Enter-Taste für "Tisch hinzufügen"-Felder
+                this.setupAddTableEnterHandlers();
+            }
+
+            setupAddTableEnterHandlers() {
+                const tableNumberInput = document.getElementById('tableNumber');
+                const tableWidthInput = document.getElementById('tableWidth');
+                const tableHeightInput = document.getElementById('tableHeight');
+                
+                [tableNumberInput, tableWidthInput, tableHeightInput].forEach(input => {
+                    if (input) {
+                        input.addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                this.addTable();
+                            }
+                        });
+                    }
+                });
+            }
+
+            toggleCollisionDetection() {
+                this.collisionDetection = !this.collisionDetection;
+                const text = document.getElementById('collisionText');
+                if (text) {
+                    text.textContent = `Kollision: ${this.collisionDetection ? 'Ein' : 'Aus'}`;
+                }
+                
+                const button = document.getElementById('toggleCollision');
+                if (button) {
+                    button.style.backgroundColor = this.collisionDetection ? 'var(--success-color)' : 'var(--warning-color)';
+                }
+            }
+
+            setCollisionMargin(margin) {
+                this.collisionMargin = Math.max(0, Math.min(10, margin)); // 0-10px
+                this.showNotification(`Kollisions-Abstand: ${this.collisionMargin}px`, 'info');
+            }
+
+            copyTableFormat() {
+                if (!this.selectedTable) return;
+                
+                const table = this.tables.get(this.selectedTable);
+                if (!table) return;
+                
+                this.copiedFormat = {
+                    width: table.width,
+                    height: table.height,
+                    rotation: table.rotation,
+                    shape: table.shape
+                };
+                
+                const pasteBtn = document.getElementById('pasteTableFormat');
+                if (pasteBtn) pasteBtn.disabled = false;
+                
+                this.showNotification('Tisch-Format kopiert!', 'success');
+            }
+
+            pasteTableFormat() {
+                if (!this.selectedTable || !this.copiedFormat) return;
+                
+                const table = this.tables.get(this.selectedTable);
+                const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.selectedTable}"]`);
+                
+                if (!table || !element) return;
+
+                table.width = this.copiedFormat.width;
+                table.height = this.copiedFormat.height;
+                table.rotation = this.copiedFormat.rotation;
+                table.shape = this.copiedFormat.shape;
+
+                element.className = 'table-item' + (table.shape === 'round' ? ' round' : '');
+                this.updateTableElement(element, table);
+                this.showTableControls(table);
+                this.showNotification('Tisch-Format eingefügt!', 'success');
+            }
+
+            checkCollision(tableId, newX, newY, width, height) {
+                if (!this.collisionDetection) return false;
+                
+                const margin = this.collisionMargin;
+                
+                for (const [id, otherTable] of this.tables) {
+                    if (id === tableId) continue;
+                    
+                    const otherWidth = this.canvasManager.metersToPixels(otherTable.width / 100);
+                    const otherHeight = this.canvasManager.metersToPixels(otherTable.height / 100);
+                    
+                    if (newX < otherTable.x + otherWidth + margin &&
+                        newX + width + margin > otherTable.x &&
+                        newY < otherTable.y + otherHeight + margin &&
+                        newY + height + margin > otherTable.y) {
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+
+            addTable() {
+                const numberInput = document.getElementById('tableNumber');
+                const shapeInput = document.getElementById('tableShape');
+                const widthInput = document.getElementById('tableWidth');
+                const heightInput = document.getElementById('tableHeight');
+                
+                const number = SecurityUtils.sanitizeInput(numberInput?.value || '') || 'T' + (this.tables.size + 1);
+                const shape = shapeInput?.value || 'rectangle';
+                const width = SecurityUtils.validateNumber(widthInput?.value, 30, 300);
+                const height = SecurityUtils.validateNumber(heightInput?.value, 30, 300);
+
+                if (!width || !height) {
+                    this.showNotification('Bitte gültige Abmessungen eingeben (30-300 cm)', 'error');
+                    return;
+                }
+
+                const table = {
+                    id: SecurityUtils.generateId(),
+                    number: number,
+                    shape: shape,
+                    width: width,
+                    height: height,
+                    x: 50,
+                    y: 50,
+                    rotation: 0
+                };
+
+                const widthPx = this.canvasManager.metersToPixels(width / 100);
+                const heightPx = this.canvasManager.metersToPixels(height / 100);
+                
+                if (this.checkCollision(table.id, table.x, table.y, widthPx, heightPx)) {
+                    let found = false;
+                    const canvasWidth = this.canvasManager.canvas?.offsetWidth || 500;
+                    const canvasHeight = this.canvasManager.canvas?.offsetHeight || 400;
+                    
+                    for (let y = 50; y < canvasHeight - heightPx && !found; y += 50) {
+                        for (let x = 50; x < canvasWidth - widthPx && !found; x += 50) {
+                            if (!this.checkCollision(table.id, x, y, widthPx, heightPx)) {
+                                table.x = x;
+                                table.y = y;
+                                found = true;
+                            }
+                        }
+                    }
+                    
+                    if (!found) {
+                        this.showNotification('Kein freier Platz für den Tisch gefunden', 'warning');
+                    }
+                }
+
+                this.createTableElement(table);
+                this.tables.set(table.id, table);
+                
+                if (numberInput) numberInput.value = '';
+            }
+
+            createTableElement(table) {
+                if (!this.canvasManager.canvas) return;
+                
+                const element = document.createElement('div');
+                element.className = 'table-item' + (table.shape === 'round' ? ' round' : '');
+                element.textContent = table.number;
+                element.dataset.tableId = table.id;
+                
+                this.updateTableElement(element, table);
+                
+                element.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.selectTable(table.id);
+                });
+                
+                this.canvasManager.canvas.appendChild(element);
+            }
+
+            updateTableElement(element, table) {
+                if (!element) return;
+                
+                const widthPx = this.canvasManager.metersToPixels(table.width / 100);
+                const heightPx = this.canvasManager.metersToPixels(table.height / 100);
+                
+                element.style.height = Math.max(15, heightPx) + 'px';
+				element.style.width = Math.max(15, widthPx) + 'px';
+                element.style.left = table.x + 'px';
+                element.style.top = table.y + 'px';
+                element.style.transform = `rotate(${table.rotation}deg)`;
+                element.textContent = table.number;
+                
+                const avgSize = (widthPx + heightPx) / 2;
+                if (avgSize < 25) {
+                    element.style.fontSize = '8px';
+                } else if (avgSize < 40) {
+                    element.style.fontSize = '10px';
+                } else {
+                    element.style.fontSize = '12px';
+                }
+            }
+
+
+            selectTable(tableId) {
+                if (this.selectedTable) {
+                    const prevElement = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.selectedTable}"]`);
+                    if (prevElement) prevElement.classList.remove('selected');
+                }
+
+                this.selectedTable = tableId;
+                const table = this.tables.get(tableId);
+                const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${tableId}"]`);
+                
+                if (element && table) {
+                    element.classList.add('selected');
+                    this.showTableControls(table);
+                }
+            }
+
+            showTableControls(table) {
+                const infoElement = document.getElementById('selectedTableInfo');
+                const controlsElement = document.getElementById('selectedTableControls');
+                
+                if (infoElement) infoElement.style.display = 'none';
+                if (controlsElement) controlsElement.style.display = 'block';
+                
+                const numberInput = document.getElementById('selectedTableNumber');
+                const widthInput = document.getElementById('selectedTableWidth');
+                const heightInput = document.getElementById('selectedTableHeight');
+                const rotationInput = document.getElementById('selectedTableRotation');
+                
+                if (numberInput) numberInput.value = table.number;
+                if (widthInput) widthInput.value = table.width;
+                if (heightInput) heightInput.value = table.height;
+                
+                let displayRotation = table.rotation;
+                if (displayRotation > 180) {
+                    displayRotation = displayRotation - 360;
+                }
+                if (rotationInput) rotationInput.value = displayRotation;
+                
+                // Enter-Taste Event-Listener für alle Eingabefelder
+                [numberInput, widthInput, heightInput, rotationInput].forEach(input => {
+                    if (input) {
+                        // Alte Event-Listener entfernen
+                        input.removeEventListener('keydown', this.handleEnterKey);
+                        // Neuen Event-Listener hinzufügen
+                        input.addEventListener('keydown', this.handleEnterKey.bind(this));
+                    }
+                });
+            }
+
+            handleEnterKey(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.updateSelectedTable();
+                }
+            }
+
+            updateSelectedTable() {
+                if (!this.selectedTable) return;
+                
+                const table = this.tables.get(this.selectedTable);
+                const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.selectedTable}"]`);
+                
+                if (!table || !element) return;
+
+                const numberInput = document.getElementById('selectedTableNumber');
+                const widthInput = document.getElementById('selectedTableWidth');
+                const heightInput = document.getElementById('selectedTableHeight');
+                const rotationInput = document.getElementById('selectedTableRotation');
+
+                const number = SecurityUtils.sanitizeInput(numberInput?.value || '');
+                const width = SecurityUtils.validateNumber(widthInput?.value, 30, 300);
+                const height = SecurityUtils.validateNumber(heightInput?.value, 30, 300);
+                const rotation = SecurityUtils.validateNumber(rotationInput?.value, -180, 180);
+
+                if (!width || !height || rotation === null) {
+                    this.showNotification('Bitte gültige Werte eingeben', 'error');
+                    return;
+                }
+
+                table.number = number;
+                table.width = width;
+                table.height = height;
+                table.rotation = rotation < 0 ? rotation + 360 : rotation;
+
+                this.updateTableElement(element, table);
+            }
+
+            deleteSelectedTable() {
+                if (!this.selectedTable) return;
+                
+                const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.selectedTable}"]`);
+                if (element) element.remove();
+                
+                this.tables.delete(this.selectedTable);
+                this.selectedTable = null;
+                
+                const infoElement = document.getElementById('selectedTableInfo');
+                const controlsElement = document.getElementById('selectedTableControls');
+                
+                if (infoElement) infoElement.style.display = 'block';
+                if (controlsElement) controlsElement.style.display = 'none';
+            }
+
+            handleMouseDown(e) {
+                const tableElement = e.target.closest('.table-item');
+                if (!tableElement) return;
+
+                this.draggedTable = tableElement.dataset.tableId;
+                const table = this.tables.get(this.draggedTable);
+                if (!table) return;
+
+                const canvasRect = this.canvasManager.canvas?.getBoundingClientRect();
+                if (!canvasRect) return;
+                
+                const mouseX = (e.clientX - canvasRect.left) / this.canvasManager.zoom;
+                const mouseY = (e.clientY - canvasRect.top) / this.canvasManager.zoom;
+                
+                this.dragOffset = {
+                    x: mouseX - table.x,
+                    y: mouseY - table.y
+                };
+
+                tableElement.style.opacity = '0.8';
+                document.body.style.cursor = 'grabbing';
+                e.preventDefault();
+            }
+
+            handleMouseMove(e) {
+                if (!this.draggedTable) return;
+
+                const table = this.tables.get(this.draggedTable);
+                const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.draggedTable}"]`);
+                
+                if (!table || !element) return;
+
+                const canvasRect = this.canvasManager.canvas?.getBoundingClientRect();
+                if (!canvasRect) return;
+                
+                const mouseX = (e.clientX - canvasRect.left) / this.canvasManager.zoom;
+                const mouseY = (e.clientY - canvasRect.top) / this.canvasManager.zoom;
+
+                const newX = mouseX - this.dragOffset.x;
+                const newY = mouseY - this.dragOffset.y;
+
+                const widthPx = this.canvasManager.metersToPixels(table.width / 100);
+                const heightPx = this.canvasManager.metersToPixels(table.height / 100);
+                const maxX = (this.canvasManager.canvas?.offsetWidth || 500) - widthPx;
+                const maxY = (this.canvasManager.canvas?.offsetHeight || 400) - heightPx;
+
+                const clampedX = Math.max(0, Math.min(maxX, newX));
+                const clampedY = Math.max(0, Math.min(maxY, newY));
+
+                // Visuelles Feedback während des Ziehens
+                const hasCollision = this.checkCollision(this.draggedTable, clampedX, clampedY, widthPx, heightPx);
+                
+                if (hasCollision) {
+                    element.style.borderColor = 'var(--danger-color)';
+                    element.style.opacity = '0.6';
+                } else {
+                    element.style.borderColor = 'var(--primary-color)';
+                    element.style.opacity = '0.8';
+                }
+
+                // Position immer visuell aktualisieren (auch bei Kollision)
+                element.style.left = clampedX + 'px';
+                element.style.top = clampedY + 'px';
+                
+                // Temporäre Position für Kollisionsprüfung beim Loslassen
+                this.tempPosition = { x: clampedX, y: clampedY };
+                
+                e.preventDefault();
+            }
+
+            handleMouseUp() {
+                if (this.draggedTable) {
+                    const table = this.tables.get(this.draggedTable);
+                    const element = this.canvasManager.canvas?.querySelector(`[data-table-id="${this.draggedTable}"]`);
+                    
+                    if (table && element && this.tempPosition) {
+                        const widthPx = this.canvasManager.metersToPixels(table.width / 100);
+                        const heightPx = this.canvasManager.metersToPixels(table.height / 100);
+                        
+                        // Kollisionsprüfung beim Loslassen
+                        if (this.checkCollision(this.draggedTable, this.tempPosition.x, this.tempPosition.y, widthPx, heightPx)) {
+                            // Kollision! -> Gültige Position finden
+                            const validPosition = this.findValidPosition(this.draggedTable, widthPx, heightPx, table.x, table.y);
+                            
+                            if (validPosition) {
+                                table.x = validPosition.x;
+                                table.y = validPosition.y;
+                                element.style.left = validPosition.x + 'px';
+                                element.style.top = validPosition.y + 'px';
+                                this.showNotification('Tisch wurde wegen Kollision verschoben', 'warning');
+                            } else {
+                                // Zurück zur ursprünglichen Position
+                                element.style.left = table.x + 'px';
+                                element.style.top = table.y + 'px';
+                                this.showNotification('Kein freier Platz gefunden - Tisch zurückgesetzt', 'error');
+                            }
+                        } else {
+                            // Keine Kollision -> Position übernehmen
+                            table.x = this.tempPosition.x;
+                            table.y = this.tempPosition.y;
+                        }
+                        
+                        // Visuellen Zustand zurücksetzen
+                        element.style.opacity = '1';
+                        element.style.borderColor = 'var(--primary-color)';
+                    }
+                    
+                    document.body.style.cursor = '';
+                    this.tempPosition = null;
+                }
+                this.draggedTable = null;
+            }
+
+            findValidPosition(tableId, widthPx, heightPx, originalX, originalY) {
+                const stepSize = 10; // 10px Schritte
+                const maxDistance = 100; // Maximale Suchentfernung
+                const canvasWidth = this.canvasManager.canvas?.offsetWidth || 500;
+                const canvasHeight = this.canvasManager.canvas?.offsetHeight || 400;
+                
+                // Spiralförmige Suche um die ursprüngliche Position
+                for (let distance = stepSize; distance <= maxDistance; distance += stepSize) {
+                    const positions = this.generateSpiralPositions(originalX, originalY, distance, stepSize);
+                    
+                    for (const pos of positions) {
+                        // Innerhalb der Canvas-Grenzen?
+                        if (pos.x >= 0 && pos.y >= 0 && 
+                            pos.x + widthPx <= canvasWidth && 
+                            pos.y + heightPx <= canvasHeight) {
+                            
+                            // Keine Kollision?
+                            if (!this.checkCollision(tableId, pos.x, pos.y, widthPx, heightPx)) {
+                                return pos;
+                            }
+                        }
+                    }
+                }
+                
+                // Letzte Rettung: Systematische Suche im gesamten Canvas
+                for (let y = 0; y <= canvasHeight - heightPx; y += stepSize) {
+                    for (let x = 0; x <= canvasWidth - widthPx; x += stepSize) {
+                        if (!this.checkCollision(tableId, x, y, widthPx, heightPx)) {
+                            return { x, y };
+                        }
+                    }
+                }
+                
+                return null; // Kein freier Platz gefunden
+            }
+
+            generateSpiralPositions(centerX, centerY, distance, stepSize) {
+                const positions = [];
+                const steps = Math.ceil(distance / stepSize);
+                
+                // Acht Richtungen um das Zentrum
+                const directions = [
+                    { x: 0, y: -1 },   // Oben
+                    { x: 1, y: -1 },   // Oben-Rechts
+                    { x: 1, y: 0 },    // Rechts
+                    { x: 1, y: 1 },    // Unten-Rechts
+                    { x: 0, y: 1 },    // Unten
+                    { x: -1, y: 1 },   // Unten-Links
+                    { x: -1, y: 0 },   // Links
+                    { x: -1, y: -1 }   // Oben-Links
+                ];
+                
+                directions.forEach(dir => {
+                    for (let i = 1; i <= steps; i++) {
+                        positions.push({
+                            x: centerX + (dir.x * i * stepSize),
+                            y: centerY + (dir.y * i * stepSize)
+                        });
+                    }
+                });
+                
+                return positions;
+            }
+
+            clearAll() {
+                if (this.canvasManager.canvas) {
+                    this.canvasManager.canvas.innerHTML = '';
+                }
+                this.tables.clear();
+                this.selectedTable = null;
+                
+                const infoElement = document.getElementById('selectedTableInfo');
+                const controlsElement = document.getElementById('selectedTableControls');
+                
+                if (infoElement) infoElement.style.display = 'block';
+                if (controlsElement) controlsElement.style.display = 'none';
+            }
+
+            getAllTables() {
+                return Array.from(this.tables.values());
+            }
+
+            loadTables(tablesData) {
+                this.clearAll();
+                tablesData.forEach(tableData => {
+                    this.tables.set(tableData.id, tableData);
+                    this.createTableElement(tableData);
+                });
+            }
+
+            showNotification(message, type) {
+                if (window.layoutManager && window.layoutManager.showNotification) {
+                    window.layoutManager.showNotification(message, type);
+                } else {
+                    alert(message);
+                }
+            }
+        }
+
+        // Layout Manager
+        class LayoutManager {
+            constructor(tableManager) {
+                this.tableManager = tableManager;
+                this.api = new DatabaseAPI();
+                this.layouts = new Map();
+                this.isLoading = false;
+                
+                this.initEventListeners();
+                this.loadLayoutsFromDatabase();
+            }
+
+            initEventListeners() {
+                const saveBtn = document.getElementById('saveLayout');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', () => this.saveLayout());
+                }
+                
+                // Enter-Taste für Layout-Name
+                const layoutNameInput = document.getElementById('layoutName');
+                if (layoutNameInput) {
+                    layoutNameInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            this.saveLayout();
+                        }
+                    });
+                }
+            }
+
+            async saveLayout() {
+                const nameInput = document.getElementById('layoutName');
+                const name = SecurityUtils.sanitizeInput(nameInput?.value || '');
+                
+                if (!name) {
+                    this.showError('Bitte einen Layout-Namen eingeben');
+                    return;
+                }
+
+                if (this.isLoading) {
+                    this.showError('Vorgang läuft bereits...');
+                    return;
+                }
+
+                try {
+                    this.setLoading(true);
+                    
+                    const roomWidthInput = document.getElementById('roomWidth');
+                    const roomHeightInput = document.getElementById('roomHeight');
+                    
+                    const layoutData = {
+                        name: name,
+                        roomWidth: SecurityUtils.validateNumber(roomWidthInput?.value, 1, 100) || 10,
+                        roomHeight: SecurityUtils.validateNumber(roomHeightInput?.value, 1, 100) || 8,
+                        createdBy: 'system',
+                        tables: this.tableManager.getAllTables()
+                    };
+
+                    const result = await this.api.saveLayout(layoutData);
+                    
+                    const newLayout = {
+                        id: result.id,
+                        name: layoutData.name,
+                        roomWidth: layoutData.roomWidth,
+                        roomHeight: layoutData.roomHeight,
+                        tableCount: layoutData.tables.length,
+                        created: new Date().toISOString(),
+                        createdBy: layoutData.createdBy
+                    };
+                    
+                    this.layouts.set(result.id, newLayout);
+                    this.renderLayoutList();
+                    
+                    if (nameInput) nameInput.value = '';
+                    this.showSuccess('Layout erfolgreich gespeichert!');
+                    
+                } catch (error) {
+                    this.showError('Fehler beim Speichern: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async loadLayout(layoutId) {
+                if (this.isLoading) {
+                    this.showError('Vorgang läuft bereits...');
+                    return;
+                }
+
+                try {
+                    this.setLoading(true);
+                    
+                    const layout = await this.api.getLayout(layoutId);
+                    
+                    if (!layout) {
+                        this.showError('Layout nicht gefunden');
+                        return;
+                    }
+
+                    const roomWidthInput = document.getElementById('roomWidth');
+                    const roomHeightInput = document.getElementById('roomHeight');
+                    
+                    if (roomWidthInput) roomWidthInput.value = layout.roomWidth;
+                    if (roomHeightInput) roomHeightInput.value = layout.roomHeight;
+                    
+                    if (window.canvasManager) {
+                        window.canvasManager.updateCanvasSize(layout.roomWidth, layout.roomHeight);
+                    }
+
+                    this.tableManager.loadTables(layout.tables);
+                    this.showSuccess(`Layout "${layout.name}" geladen`);
+                    
+                } catch (error) {
+                    this.showError('Fehler beim Laden: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async deleteLayout(layoutId) {
+                if (!confirm('Layout wirklich aus der Datenbank löschen?')) {
+                    return;
+                }
+
+                if (this.isLoading) {
+                    this.showError('Vorgang läuft bereits...');
+                    return;
+                }
+
+                try {
+                    this.setLoading(true);
+                    
+                    await this.api.deleteLayout(layoutId);
+                    
+                    this.layouts.delete(layoutId);
+                    this.renderLayoutList();
+                    
+                    this.showSuccess('Layout erfolgreich gelöscht');
+                    
+                } catch (error) {
+                    this.showError('Fehler beim Löschen: ' + error.message);
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            async loadLayoutsFromDatabase() {
+                try {
+                    this.setLoading(true);
+                    
+                    const layouts = await this.api.getLayouts();
+                    
+                    this.layouts.clear();
+                    layouts.forEach(layout => {
+                        this.layouts.set(layout.id, layout);
+                    });
+                    
+                    this.renderLayoutList();
+                    
+                } catch (error) {
+                    console.error('Fehler beim Laden der Layouts:', error);
+                    this.showError('Layouts konnten nicht geladen werden: ' + error.message);
+                    this.loadLayoutsFromLocalStorage();
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            loadLayoutsFromLocalStorage() {
+                try {
+                    const saved = localStorage.getItem('tablePlanLayouts');
+                    if (saved) {
+                        const layoutsArray = JSON.parse(saved);
+                        this.layouts = new Map(layoutsArray);
+                        this.renderLayoutList();
+                        this.showWarning('Offline-Modus: Layouts aus lokalem Speicher geladen');
+                    }
+                } catch (e) {
+                    console.warn('Layouts konnten auch nicht aus localStorage geladen werden:', e);
+                }
+            }
+
+            renderLayoutList() {
+                const container = document.getElementById('layoutList');
+                if (!container) return;
+                
+                container.innerHTML = '';
+
+                if (this.layouts.size === 0) {
+                    container.innerHTML = `
+                        <div style="padding: 16px; text-align: center; color: var(--text-secondary);">
+                            ${this.isLoading ? 'Layouts werden geladen...' : 'Keine Layouts gefunden'}
+                        </div>
+                    `;
+                    return;
+                }
+
+                const sortedLayouts = Array.from(this.layouts.values())
+                    .sort((a, b) => new Date(b.created) - new Date(a.created));
+
+                sortedLayouts.forEach(layout => {
+                    const item = document.createElement('div');
+                    item.className = 'layout-item';
+                    
+                    const createdDate = new Date(layout.created).toLocaleDateString('de-DE');
+                    
+                    item.innerHTML = `
+                        <div>
+                            <strong>${SecurityUtils.sanitizeInput(layout.name)}</strong><br>
+                            <small style="color: var(--text-secondary);">
+                                ${layout.tableCount} Tische • ${layout.roomWidth}×${layout.roomHeight}m<br>
+                                Erstellt: ${createdDate}
+                            </small>
+                        </div>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="btn btn-primary btn-sm" onclick="window.layoutManager.loadLayout(${layout.id})" 
+                                    ${this.isLoading ? 'disabled' : ''}>
+                                Laden
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="window.layoutManager.deleteLayout(${layout.id})"
+                                    ${this.isLoading ? 'disabled' : ''}>
+                                ×
+                            </button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+
+            setLoading(loading) {
+                this.isLoading = loading;
+                const saveButton = document.getElementById('saveLayout');
+                
+                if (saveButton) {
+                    if (loading) {
+                        saveButton.disabled = true;
+                        saveButton.textContent = 'Speichert...';
+                    } else {
+                        saveButton.disabled = false;
+                        saveButton.textContent = 'Layout speichern';
+                    }
+                }
+                
+                this.renderLayoutList();
+            }
+
+            showSuccess(message) { this.showNotification(message, 'success'); }
+            showError(message) { this.showNotification(message, 'error'); }
+            showWarning(message) { this.showNotification(message, 'warning'); }
+
+            showNotification(message, type = 'info') {
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed; top: 20px; right: 20px; z-index: 10000;
+                    background: ${type === 'error' ? 'var(--danger-color)' : 
+                                type === 'success' ? 'var(--success-color)' : 
+                                type === 'warning' ? 'var(--warning-color)' : 'var(--primary-color)'};
+                    color: white; padding: 12px 16px; border-radius: 6px;
+                    box-shadow: var(--shadow); max-width: 300px; font-size: 14px;
+                    animation: slideIn 0.3s ease-out;
+                `;
+                
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.style.animation = 'slideOut 0.3s ease-in';
+                    setTimeout(() => {
+                        if (notification.parentNode) {
+                            notification.parentNode.removeChild(notification);
+                        }
+                    }, 300);
+                }, 4000);
+            }
+        }
+
+        // Initialisierung nach DOM-Load
+        let canvasManager, tableManager, layoutManager;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            canvasManager = new CanvasManager();
+            tableManager = new TableManager(canvasManager);
+            layoutManager = new LayoutManager(tableManager);
+
+            window.canvasManager = canvasManager;
+            window.tableManager = tableManager;
+            window.layoutManager = layoutManager;
+            
+            // Event-Listener nach Initialisierung
+            setTimeout(() => {
+                const updateRoomBtn = document.getElementById('updateRoom');
+                const clearCanvasBtn = document.getElementById('clearCanvas');
+                
+                if (updateRoomBtn) {
+                    updateRoomBtn.addEventListener('click', () => {
+                        const roomWidthInput = document.getElementById('roomWidth');
+                        const roomHeightInput = document.getElementById('roomHeight');
+                        
+                        const width = SecurityUtils.validateNumber(roomWidthInput?.value, 1, 100);
+                        const height = SecurityUtils.validateNumber(roomHeightInput?.value, 1, 100);
+                        
+                        if (width && height) {
+                            canvasManager.updateCanvasSize(width, height);
+                        } else {
+                            alert('Bitte gültige Raumabmessungen eingeben (1-100m)');
+                        }
+                    });
+                }
+
+                // Enter-Taste für Raum-Eingabefelder
+                const roomWidthInput = document.getElementById('roomWidth');
+                const roomHeightInput = document.getElementById('roomHeight');
+                
+                [roomWidthInput, roomHeightInput].forEach(input => {
+                    if (input) {
+                        input.addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const width = SecurityUtils.validateNumber(document.getElementById('roomWidth')?.value, 1, 100);
+                                const height = SecurityUtils.validateNumber(document.getElementById('roomHeight')?.value, 1, 100);
+                                
+                                if (width && height) {
+                                    canvasManager.updateCanvasSize(width, height);
+                                } else {
+                                    alert('Bitte gültige Raumabmessungen eingeben (1-100m)');
+                                }
+                            }
+                        });
+                    }
+                });
+
+                if (clearCanvasBtn) {
+                    clearCanvasBtn.addEventListener('click', () => {
+                        if (confirm('Alle Tische löschen?')) {
+                            tableManager.clearAll();
+                        }
+                    });
+                }
+
+                // Canvas deselektieren
+                if (canvasManager.canvas) {
+                    canvasManager.canvas.addEventListener('click', (e) => {
+                        if (e.target === canvasManager.canvas && tableManager.selectedTable) {
+                            const prevElement = canvasManager.canvas.querySelector(`[data-table-id="${tableManager.selectedTable}"]`);
+                            if (prevElement) prevElement.classList.remove('selected');
+                            tableManager.selectedTable = null;
+                            document.getElementById('selectedTableInfo').style.display = 'block';
+                            document.getElementById('selectedTableControls').style.display = 'none';
+                        }
+                    });
+                }
+
+                // Keyboard-Shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (e.target.tagName === 'INPUT') return;
+                    
+                    switch(e.key) {
+                        case 'Delete':
+                        case 'Backspace':
+                            if (tableManager.selectedTable) {
+                                tableManager.deleteSelectedTable();
+                                e.preventDefault();
+                            }
+                            break;
+                            
+                        case 'Escape':
+                            if (tableManager.selectedTable) {
+                                const prevElement = canvasManager.canvas?.querySelector(`[data-table-id="${tableManager.selectedTable}"]`);
+                                if (prevElement) prevElement.classList.remove('selected');
+                                tableManager.selectedTable = null;
+                                document.getElementById('selectedTableInfo').style.display = 'block';
+                                document.getElementById('selectedTableControls').style.display = 'none';
+                            }
+                            break;
+                            
+                        case '+':
+                            if (e.ctrlKey || e.metaKey) {
+                                canvasManager.setZoom(canvasManager.zoom * 1.2);
+                                e.preventDefault();
+                            }
+                            break;
+                            
+                        case '-':
+                            if (e.ctrlKey || e.metaKey) {
+                                canvasManager.setZoom(canvasManager.zoom / 1.2);
+                                e.preventDefault();
+                            }
+                            break;
+                            
+                        case '0':
+                            if (e.ctrlKey || e.metaKey) {
+                                canvasManager.setZoom(1);
+                                e.preventDefault();
+                            }
+                            break;
+                    }
+                });
+
+                // Mausrad-Zoom mit passivem Event-Listener
+                if (canvasManager.canvas) {
+                    canvasManager.canvas.addEventListener('wheel', (e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                            canvasManager.setZoom(canvasManager.zoom * delta);
+                        }
+                    }, { passive: false }); // Explizit nicht-passiv für preventDefault()
+                }
+
+                // Canvas-Panning
+                let isPanning = false;
+                let panStart = { x: 0, y: 0 };
+                let scrollStart = { x: 0, y: 0 };
+
+                if (canvasManager.wrapper) {
+                    canvasManager.wrapper.addEventListener('mousedown', (e) => {
+                        if (e.target === canvasManager.canvas && !e.target.closest('.table-item')) {
+                            isPanning = true;
+                            panStart = { x: e.clientX, y: e.clientY };
+                            scrollStart = { 
+                                x: canvasManager.wrapper.scrollLeft, 
+                                y: canvasManager.wrapper.scrollTop 
+                            };
+                            canvasManager.canvas.style.cursor = 'grabbing';
+                        }
+                    });
+
+                    document.addEventListener('mousemove', (e) => {
+                        if (isPanning) {
+                            const deltaX = e.clientX - panStart.x;
+                            const deltaY = e.clientY - panStart.y;
+                            canvasManager.wrapper.scrollLeft = scrollStart.x - deltaX;
+                            canvasManager.wrapper.scrollTop = scrollStart.y - deltaY;
+                        }
+                    });
+
+                    document.addEventListener('mouseup', () => {
+                        if (isPanning) {
+                            isPanning = false;
+                            canvasManager.canvas.style.cursor = 'grab';
+                        }
+                    });
+                }
+                
+				// HIER wird der Kollisions-Abstand-Regler Code eingefügt
+                const collisionMarginSlider = document.getElementById('collisionMargin');
+                const marginValueDisplay = document.getElementById('marginValue');
+
+                if (collisionMarginSlider && marginValueDisplay && window.tableManager) {
+                    collisionMarginSlider.addEventListener('input', (e) => {
+                        const value = parseInt(e.target.value);
+                        window.tableManager.setCollisionMargin(value);
+                        marginValueDisplay.textContent = value + 'px';
+                    });
+                }
+            }, 100);
+            
+            console.log('Tischplan-Editor erfolgreich initialisiert');
+        });
+    </script>
+</body>
+</html>
+                
