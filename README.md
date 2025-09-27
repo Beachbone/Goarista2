@@ -2,7 +2,11 @@
 
 > ⚠️ **IN ENTWICKLUNG - NICHT EINSATZBEREIT** ⚠️
 
-Webbasiertes QR-Bestellsystem für Schlachtfeste mit FreePascal-Backend.
+ 
+## **Work still in progress. Not for use**
+
+Webbasiertes QR-Bestellsystem für Schlachtfeste und ähnliche Veranstaltungen, mit FreePascal-Backend und Webbasiertem Frontend. 
+PWA für den Service
 
 **Fortschritt:** ~65%
 
@@ -12,7 +16,7 @@ Webbasiertes QR-Bestellsystem für Schlachtfeste mit FreePascal-Backend.
 |---------|-------------|--------|
 | **Backend** | FreePascal + SQLite | ✅ 92% (24/26 Tests) |
 | **Service-App** | HTML5 PWA + QR-Scanner | ✅ 85% |
-| **Admin-Frontend** | HTML/CSS/JS | 🔴 0% |
+| **Admin-Frontend** | HTML/CSS/JS | 🔴 50% |
 | **Küchen-Display** | Server-Sent Events | 🔴 0% |
 | **Bestellstation** | Touch Web-App | 🔴 0% |
 
