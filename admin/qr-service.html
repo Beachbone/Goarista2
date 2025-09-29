@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="QR-Order">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a1a">
+    <title>QR Bestellungssystem - Service</title>
+    
+    <!-- PWA Icons -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%233b82f6'/%3E%3Ctext y='70' font-size='70' text-anchor='middle' x='50' fill='white'%3EQ%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%233b82f6' rx='20'/%3E%3Ctext y='130' font-size='120' text-anchor='middle' x='90' fill='white'%3EQ%3C/text%3E%3C/svg%3E">
+    
+    <!-- PWA Manifest -->
+    <script id="manifest-data" type="application/json">
+    {
+        "name": "QR Bestellungssystem - Service",
+        "short_name": "QR-Service",
+        "start_url": "./",
+        "display": "standalone",
+        "background_color": "#1a1a1a",
+        "theme_color": "#1a1a1a",
+        "orientation": "portrait-primary",
+        "scope": "./",
+        "icons": [
+            {
+                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%233b82f6' rx='20'/%3E%3Ctext y='140' font-size='120' text-anchor='middle' x='96' fill='white'%3ES%3C/text%3E%3C/svg%3E",
+                "sizes": "192x192",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            },
+            {
+                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%233b82f6' rx='50'/%3E%3Ctext y='360' font-size='300' text-anchor='middle' x='256' fill='white'%3ES%3C/text%3E%3C/svg%3E",
+                "sizes": "512x512",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            }
+        ]
+    }
+    </script>
+    
+    <link rel="stylesheet" href="/css/qr-service.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🍽️ QR Bestellung</h1>
+            <p>Service-App für Bedienung</p>
+        </header>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Connection Status -->
+            <div class="connection-status">
+                <div>
+                    <span class="status-indicator status-offline"></span>
+                    <strong id="connectionStatus">Verbindung prüfen...</strong>
+                </div>
+                <div class="connection-info" id="connectionInfo">
+                    Verbinde mit Server...
+                </div>
+            </div>
+
+            <!-- Scanner Section -->
+            <div class="scanner-section">
+                <h2>QR-Code Scannen</h2>
+                <p style="margin: 12px 0; opacity: 0.8;">Scannen Sie den QR-Code am Tisch</p>
+                <button class="scanner-button" onclick="startScanner()">
+                    <span class="scanner-icon">📷</span>
+                    Scanner öffnen
+                </button>
+            </div>
+
+            <!-- Table Selection -->
+            <div class="scanner-section">
+                <h2>Tisch auswählen</h2>
+                <p style="margin: 12px 0 20px; opacity: 0.8;">Oder wählen Sie manuell einen Tisch</p>
+                <div class="table-grid" id="tableGrid">
+                    <!-- Tables will be loaded here -->
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Camera View -->
+    <div class="camera-view" id="cameraView">
+        <div class="camera-header">
+            <h2>QR-Code scannen</h2>
+            <button class="close-camera" onclick="closeScanner()">×</button>
+        </div>
+        <div class="camera-container">
+            <video id="qr-video" playsinline></video>
+            <div class="scanner-overlay"></div>
+            <div class="qr-result" id="qrResult"></div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="confirmation-modal" id="confirmationModal">
+        <div class="confirmation-card">
+            <h2 class="confirmation-title">Bestellung bestätigen</h2>
+            <p class="confirmation-text" id="confirmTableInfo">Tisch: -</p>
+            
+            <textarea 
+                class="note-input" 
+                id="orderNote" 
+                placeholder="Notiz zur Bestellung (optional)..."
+                rows="4"
+            ></textarea>
+            
+            <div class="confirmation-actions">
+                <button class="btn btn-secondary" onclick="closeConfirmation()">
+                    Abbrechen
+                </button>
+                <button class="btn btn-primary" onclick="submitOrder()">
+                    Bestätigen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Animation -->
+    <div class="success-animation" id="successAnimation"></div>
+
+    <!-- ZXing Library for QR Code Scanning -->
+    <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+    
+    <script src="/js/qr-service.js"></script>
+</body>
+</html>

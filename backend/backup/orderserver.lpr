@@ -5,6 +5,8 @@ program OrderServer;
 uses
   {$IFDEF UNIX}
   cthreads,
+  baseunix,
+  unix,
   {$ENDIF}
   Classes,
   FileInfo,
@@ -22,17 +24,23 @@ uses
   strutils;
 
 type
+
+  { TDatabaseManager }
+
   TDatabaseManager = class
   private
     FConnection: TZConnection;
     procedure InitializeDatabase;
     procedure CreateTables;
+    procedure MigrateMealSetsPriceField;
   public
     constructor Create;
     destructor Destroy; override;
     function QueryJSON(const SQL: string): TJSONArray;
     procedure ExecuteSQL(const SQL: string);
   end;
+
+  { TOrderAPIHandler }
 
   TOrderAPIHandler = class
   private
@@ -42,6 +50,7 @@ type
     function ExtractResourceId(const PathInfo: string;
       ResourcePosition: integer = 3): integer;
     function GetPathSegment(const PathInfo: string; SegmentIndex: integer): string;
+    procedure HandleAdminRadioGroups(ARequest: TRequest; AResponse: TResponse);
     function IsValidResourceId(const PathInfo: string;
       ResourcePosition: integer = 3): boolean;
 
@@ -85,8 +94,11 @@ type
     FConnection := TZConnection.Create(nil);
     FConnection.Protocol := 'sqlite';
     FConnection.Database := 'orders.db';
+    {$IFDEF WINDOWS}
     FConnection.LibraryLocation := 'sqlite3.dll';
-
+    {$ELSE}
+    FConnection.LibraryLocation := 'libsqlite3.so.0';
+    {$ENDIF}
     try
       FConnection.Connect;
       WriteLn('Database connected successfully');
@@ -170,6 +182,42 @@ type
     end;
   end;
 
+  procedure TDatabaseManager.MigrateMealSetsPriceField;
+  var
+    Query: TZQuery;
+  begin
+    WriteLn('Checking meal_sets table for price field...');
+    Query := TZQuery.Create(nil);
+    try
+      Query.Connection := FConnection;
+
+      // Check if price column exists
+      Query.SQL.Text := 'PRAGMA table_info(meal_sets)';
+      Query.Open;
+
+      while not Query.EOF do
+      begin
+        if Query.FieldByName('name').AsString = 'price' then
+        begin
+          WriteLn('Price field already exists in meal_sets table');
+          Query.Close;
+          Exit;
+        end;
+        Query.Next;
+      end;
+      Query.Close;
+
+      // Add price column if it doesn't exist
+      WriteLn('Adding price field to meal_sets table...');
+      Query.SQL.Text := 'ALTER TABLE meal_sets ADD COLUMN price DECIMAL(10,2) DEFAULT 0';
+      Query.ExecSQL;
+      WriteLn('Price field added successfully');
+
+    finally
+      Query.Free;
+    end;
+  end;
+
   procedure TDatabaseManager.CreateTables;
   begin
     // Tables configuration
@@ -191,16 +239,17 @@ type
       '  sort_order INTEGER DEFAULT 0' + ')'
       );
 
-    // Meal sets
+
+    // Meal sets - MIT PREIS
     ExecuteSQL(
       'CREATE TABLE IF NOT EXISTS meal_sets (' +
       '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
-      '  description TEXT,' + '  available BOOLEAN DEFAULT 1,' +
-      '  sort_order INTEGER DEFAULT 0,' +
+      '  description TEXT,' + '  price DECIMAL(10,2) DEFAULT 0,' +  // NEU!
+      '  available BOOLEAN DEFAULT 1,' + '  sort_order INTEGER DEFAULT 0,' +
       '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' + ')'
       );
 
-    // Ingredients - KORRIGIERT: Inventar-Spalten hinzugefügt
+    // Ingredients
     ExecuteSQL(
       'CREATE TABLE IF NOT EXISTS ingredients (' +
       '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
@@ -265,6 +314,18 @@ type
       '  date DATE DEFAULT (date(''now'')),' + '  count INTEGER DEFAULT 0,' +
       '  UNIQUE(meal_set_id, date)' + ')'
       );
+    // Radio Groups table
+    ExecuteSQL(
+      'CREATE TABLE IF NOT EXISTS radio_groups (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
+      '  exclusive BOOLEAN DEFAULT 1,' + '  sort_order INTEGER DEFAULT 0,' +
+      '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' + ')');
+
+    // Sample radio groups data
+    ExecuteSQL('INSERT OR IGNORE INTO radio_groups (id, name, exclusive, sort_order) VALUES (1, ''Leberwurst'', 1, 1)');
+    ExecuteSQL('INSERT OR IGNORE INTO radio_groups (id, name, exclusive, sort_order) VALUES (2, ''Blutwurst'', 1, 2)');
+    ExecuteSQL('INSERT OR IGNORE INTO radio_groups (id, name, exclusive, sort_order) VALUES (3, ''Schwartenmagen'', 1, 3)');
+    ExecuteSQL('INSERT OR IGNORE INTO radio_groups (id, name, exclusive, sort_order) VALUES (4, ''Wellfleisch'', 1, 4)');
 
     // Insert sample data
     ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''1'', ''Tisch 1'')');
@@ -364,6 +425,7 @@ type
   begin
     WriteLn('Initializing database schema...');
     CreateTables;
+    MigrateMealSetsPriceField;  // NEU! Migration für bestehende DBs
     WriteLn('Database initialization complete');
   end;
 
@@ -461,6 +523,208 @@ type
   end;
 
   // Handler Methods - Fixed Implementation
+
+  procedure TOrderAPIHandler.HandleAdminRadioGroups(ARequest: TRequest;
+    AResponse: TResponse);
+  var
+    RequestData: TJSONData;
+    RadioGroupObj: TJSONObject;
+    RadioGroupId: integer;
+    Query: TZQuery;
+    RadioGroups: TJSONArray;
+    PathParts: TStringArray;
+  begin
+    WriteLn('Admin RadioGroups request: ', ARequest.Method, ' ', ARequest.PathInfo);
+
+    // OPTIONS für CORS Preflight
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
+    if not ValidateAdminAccess(ARequest) then
+    begin
+      SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
+      Exit;
+    end;
+
+    try
+      case ARequest.Method of
+        'GET':
+        begin
+          RadioGroups := FDB.QueryJSON(
+            'SELECT * FROM radio_groups ORDER BY sort_order, name');
+          SendJSONResponse(AResponse, RadioGroups.AsJSON);
+          RadioGroups.Free;
+        end;
+
+        'POST':
+        begin
+          if ARequest.Content = '' then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
+            Exit;
+          end;
+
+          try
+            RequestData := GetJSON(ARequest.Content);
+          except
+            on E: Exception do
+            begin
+              SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' +
+                E.Message + '"}', 400);
+              Exit;
+            end;
+          end;
+
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
+            RequestData.Free;
+            Exit;
+          end;
+
+          RadioGroupObj := RequestData as TJSONObject;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+            Query.SQL.Text :=
+              'INSERT INTO radio_groups (name, exclusive, sort_order) VALUES (:name, :exclusive, :sort_order)';
+            Query.Params.ParamByName('name').AsString := RadioGroupObj.Get('name', '');
+            Query.Params.ParamByName('exclusive').AsBoolean :=
+              RadioGroupObj.Get('exclusive', True);
+            Query.Params.ParamByName('sort_order').AsInteger :=
+              RadioGroupObj.Get('sort_order', 0);
+            Query.ExecSQL;
+            SendJSONResponse(AResponse,
+              '{"success":true,"message":"Radio group created"}', 201);
+          finally
+            Query.Free;
+          end;
+          RequestData.Free;
+        end;
+
+        'PUT':
+        begin
+          PathParts := SplitString(ARequest.PathInfo, '/');
+          if Length(PathParts) < 5 then
+          begin
+            SendJSONResponse(AResponse,
+              '{"error":"Invalid radio group ID - path too short"}', 400);
+            Exit;
+          end;
+
+          if not TryStrToInt(PathParts[4], RadioGroupId) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid radio group ID"}', 400);
+            Exit;
+          end;
+
+          if ARequest.Content = '' then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
+            Exit;
+          end;
+
+          try
+            RequestData := GetJSON(ARequest.Content);
+          except
+            on E: Exception do
+            begin
+              SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' +
+                E.Message + '"}', 400);
+              Exit;
+            end;
+          end;
+
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
+            RequestData.Free;
+            Exit;
+          end;
+
+          RadioGroupObj := RequestData as TJSONObject;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+            Query.SQL.Text :=
+              'UPDATE radio_groups SET name = :name, exclusive = :exclusive, sort_order = :sort_order WHERE id = :id';
+            Query.Params.ParamByName('id').AsInteger := RadioGroupId;
+            Query.Params.ParamByName('name').AsString := RadioGroupObj.Get('name', '');
+            Query.Params.ParamByName('exclusive').AsBoolean :=
+              RadioGroupObj.Get('exclusive', True);
+            Query.Params.ParamByName('sort_order').AsInteger :=
+              RadioGroupObj.Get('sort_order', 0);
+            Query.ExecSQL;
+
+            WriteLn('UPDATE executed, RowsAffected: ', Query.RowsAffected);
+
+            if Query.RowsAffected > 0 then
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"Radio group updated"}')
+            else
+              SendJSONResponse(AResponse, '{"error":"Radio group not found"}', 404);
+          finally
+            Query.Free;
+          end;
+          RequestData.Free;
+        end;
+
+        'DELETE':
+        begin
+          PathParts := SplitString(ARequest.PathInfo, '/');
+          if Length(PathParts) < 5 then
+          begin
+            SendJSONResponse(AResponse,
+              '{"error":"Invalid radio group ID - path too short"}', 400);
+            Exit;
+          end;
+
+          if not TryStrToInt(PathParts[4], RadioGroupId) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid radio group ID"}', 400);
+            Exit;
+          end;
+
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+
+            // Check if any ingredients are using this radio group
+            // Note: This assumes you might add a radio_group_id field to ingredients table later
+            // For now, we just delete the group
+
+            Query.SQL.Text := 'DELETE FROM radio_groups WHERE id = :id';
+            Query.Params.ParamByName('id').AsInteger := RadioGroupId;
+            Query.ExecSQL;
+
+            if Query.RowsAffected > 0 then
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"Radio group deleted"}')
+            else
+              SendJSONResponse(AResponse, '{"error":"Radio group not found"}', 404);
+          finally
+            Query.Free;
+          end;
+        end;
+
+        else
+          SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
+      end;
+    except
+      on E: Exception do
+      begin
+        WriteLn('Error in HandleAdminRadioGroups: ', E.Message);
+        SendJSONResponse(AResponse, '{"error":"Database error: ' +
+          E.Message + '"}', 500);
+      end;
+    end;
+  end;
+
   procedure TOrderAPIHandler.HandleAdminCategories(ARequest: TRequest;
     AResponse: TResponse);
   var
@@ -472,6 +736,14 @@ type
     PathParts: TStringArray;
   begin
     WriteLn('Admin Categories request: ', ARequest.Method, ' ', ARequest.PathInfo);
+
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     if not ValidateAdminAccess(ARequest) then
     begin
@@ -604,7 +876,8 @@ type
             WriteLn('UPDATE executed, RowsAffected: ', Query.RowsAffected);
 
             if Query.RowsAffected > 0 then
-              SendJSONResponse(AResponse, '{"success":true,"message":"Category updated"}')
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"Category updated"}')
             else
               SendJSONResponse(AResponse, '{"error":"Category not found"}', 404);
           finally
@@ -619,7 +892,7 @@ type
           if Length(PathParts) < 5 then
           begin
             SendJSONResponse(AResponse,
-              '{"error":"Invalid category ID - path too short"}', 477);
+              '{"error":"Invalid category ID - path too short"}', 400);
             Exit;
           end;
 
@@ -650,7 +923,8 @@ type
             Query.ExecSQL;
 
             if Query.RowsAffected > 0 then
-              SendJSONResponse(AResponse, '{"success":true,"message":"Category deleted"}')
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"Category deleted"}')
             else
               SendJSONResponse(AResponse, '{"error":"Category not found"}', 404);
           finally
@@ -665,7 +939,8 @@ type
       on E: Exception do
       begin
         WriteLn('Error in HandleAdminCategories: ', E.Message);
-        SendJSONResponse(AResponse, '{"error":"Database error: ' + E.Message + '"}', 500);
+        SendJSONResponse(AResponse, '{"error":"Database error: ' +
+          E.Message + '"}', 500);
       end;
     end;
   end;
@@ -680,6 +955,14 @@ type
     Ingredients: TJSONArray;
   begin
     WriteLn('Admin Ingredients request: ', ARequest.Method, ' ', ARequest.PathInfo);
+
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     if not ValidateAdminAccess(ARequest) then
     begin
@@ -799,7 +1082,7 @@ type
 
         'DELETE':
         begin
-          if not IsValidResourceId(ARequest.PathInfo, 3) then
+          if not IsValidResourceId(ARequest.PathInfo, 4) then
           begin
             SendJSONResponse(AResponse, '{"error":"Invalid ingredient ID"}', 400);
             Exit;
@@ -863,6 +1146,14 @@ type
   begin
     WriteLn('Admin MealSets request: ', ARequest.Method, ' ', ARequest.PathInfo);
 
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
     if not ValidateAdminAccess(ARequest) then
     begin
       SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
@@ -871,19 +1162,31 @@ type
 
     try
       case ARequest.Method of
-        'GET':
-        begin
-          MealSets := FDB.QueryJSON(
-            'SELECT ms.*, COUNT(msi.ingredient_id) as ingredient_count ' +
-            'FROM meal_sets ms ' +
-            'LEFT JOIN meal_set_ingredients msi ON ms.id = msi.meal_set_id ' +
-            'GROUP BY ms.id ' + 'ORDER BY ms.sort_order, ms.name');
-          SendJSONResponse(AResponse, MealSets.AsJSON);
-          MealSets.Free;
+        'GET': begin
+          MealSets := TJSONArray.Create;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+            Query.SQL.Text :=
+              'SELECT ms.id, ms.name, ms.description, ms.price, ms.available, ms.sort_order, '
+              + 'COUNT(msi.id) as ingredient_count, ' +
+              'CASE WHEN ms.price > 0 THEN ms.price ' +
+              '     ELSE COALESCE(SUM(i.price), 0) ' +
+              'END as calculated_price ' + 'FROM meal_sets ms ' +
+              'LEFT JOIN meal_set_ingredients msi ON ms.id = msi.meal_set_id ' +
+              'LEFT JOIN ingredients i ON msi.ingredient_id = i.id ' +
+              'GROUP BY ms.id ' + 'ORDER BY ms.sort_order, ms.name';
+            Query.Open;
+
+            MealSets := QueryToJSONArray(Query);
+            SendJSONResponse(AResponse, MealSets.AsJSON);
+            MealSets.Free;
+          finally
+            Query.Free;
+          end;
         end;
 
-        'POST':
-        begin
+        'POST': begin
           RequestData := GetJSON(ARequest.Content);
           if not (RequestData is TJSONObject) then
           begin
@@ -895,50 +1198,115 @@ type
           Query := TZQuery.Create(nil);
           try
             Query.Connection := FDB.FConnection;
+
+            // Insert meal set
             Query.SQL.Text :=
-              'INSERT INTO meal_sets (name, description, available, sort_order) ' +
-              'VALUES (:name, :description, :available, :sort_order)';
+              'INSERT INTO meal_sets (name, description, price, available, sort_order) '
+              +
+              'VALUES (:name, :description, :price, :available, :sort_order)';
             Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
             Query.Params.ParamByName('description').AsString :=
               MealSetObj.Get('description', '');
+            Query.Params.ParamByName('price').AsFloat :=
+              MealSetObj.Get('price', 0.0);  // NEU!
             Query.Params.ParamByName('available').AsBoolean :=
               MealSetObj.Get('available', True);
             Query.Params.ParamByName('sort_order').AsInteger :=
               MealSetObj.Get('sort_order', 0);
             Query.ExecSQL;
 
-            Query.SQL.Text := 'SELECT last_insert_rowid() as id';
-            Query.Open;
-            MealSetId := Query.Fields[0].AsInteger;
-            Query.Close;
+            MealSetId := FDB.FConnection.GetInsertID;
 
-            if MealSetObj.Find('ingredients', IngredientsArray) then
+            // Insert ingredients
+            if MealSetObj.Find('ingredients') <> nil then
             begin
+              IngredientsArray := MealSetObj.Get('ingredients', TJSONArray.Create);
               for i := 0 to IngredientsArray.Count - 1 do
               begin
-                IngredientObj := IngredientsArray.Objects[i];
+                IngredientId := IngredientsArray.Integers[i];
                 Query.SQL.Text :=
-                  'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id, quantity) '
-                  + 'VALUES (:meal_set_id, :ingredient_id, :quantity)';
+                  'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id) ' +
+                  'VALUES (:meal_set_id, :ingredient_id)';
                 Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-                Query.Params.ParamByName('ingredient_id').AsInteger :=
-                  IngredientObj.Get('ingredient_id', 0);
-                Query.Params.ParamByName('quantity').AsInteger :=
-                  IngredientObj.Get('quantity', 1);
+                Query.Params.ParamByName('ingredient_id').AsInteger := IngredientId;
                 Query.ExecSQL;
               end;
             end;
 
             SendJSONResponse(AResponse,
-              '{"success":true,"message":"Meal set created","id":' +
-              IntToStr(MealSetId) + '}', 201);
+              Format('{"success":true,"id":%d}', [MealSetId]), 201);
           finally
             Query.Free;
           end;
           RequestData.Free;
         end;
 
-        'PUT':
+
+        'PUT': begin
+          if not IsValidResourceId(ARequest.PathInfo, 4) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid meal set ID"}', 400);
+            Exit;
+          end;
+
+          MealSetId := ExtractResourceId(ARequest.PathInfo, 4);
+          RequestData := GetJSON(ARequest.Content);
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
+            Exit;
+          end;
+
+          MealSetObj := RequestData as TJSONObject;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+
+            // Update meal set
+            Query.SQL.Text :=
+              'UPDATE meal_sets SET name = :name, description = :description, ' +
+              'price = :price, available = :available, sort_order = :sort_order ' +
+              'WHERE id = :id';
+            Query.Params.ParamByName('id').AsInteger := MealSetId;
+            Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
+            Query.Params.ParamByName('description').AsString :=
+              MealSetObj.Get('description', '');
+            Query.Params.ParamByName('price').AsFloat := MealSetObj.Get('price', 0.0);  // NEU!
+            Query.Params.ParamByName('available').AsBoolean := MealSetObj.Get('available', True);
+            Query.Params.ParamByName('sort_order').AsInteger := MealSetObj.Get('sort_order', 0);
+            Query.ExecSQL;
+
+            // Delete existing ingredient mappings
+            Query.SQL.Text := 'DELETE FROM meal_set_ingredients WHERE meal_set_id = :id';
+            Query.Params.ParamByName('id').AsInteger := MealSetId;
+            Query.ExecSQL;
+
+            // Insert new ingredients
+            if MealSetObj.Find('ingredients') <> nil then
+            begin
+              IngredientsArray := MealSetObj.Get('ingredients', TJSONArray.Create);
+              for i := 0 to IngredientsArray.Count - 1 do
+              begin
+                IngredientId := IngredientsArray.Integers[i];
+                Query.SQL.Text :=
+                  'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id) ' +
+                  'VALUES (:meal_set_id, :ingredient_id)';
+                Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
+                Query.Params.ParamByName('ingredient_id').AsInteger := IngredientId;
+                Query.ExecSQL;
+              end;
+            end;
+
+            if Query.RowsAffected > 0 then
+              SendJSONResponse(AResponse, '{"success":true,"message":"Meal set updated"}')
+            else
+              SendJSONResponse(AResponse, '{"error":"Meal set not found"}', 404);
+          finally
+            Query.Free;
+          end;
+          RequestData.Free;
+        end;
+        'DELETE':
         begin
           if not IsValidResourceId(ARequest.PathInfo, 4) then
           begin
@@ -946,74 +1314,6 @@ type
             Exit;
           end;
           MealSetId := ExtractResourceId(ARequest.PathInfo, 4);
-
-          RequestData := GetJSON(ARequest.Content);
-          if not (RequestData is TJSONObject) then
-          begin
-            SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-            Exit;
-          end;
-
-          MealSetObj := RequestData as TJSONObject;
-          Query := TZQuery.Create(nil);
-          try
-            Query.Connection := FDB.FConnection;
-            Query.SQL.Text :=
-              'UPDATE meal_sets SET name = :name, description = :description, ' +
-              'available = :available, sort_order = :sort_order WHERE id = :id';
-            Query.Params.ParamByName('id').AsInteger := MealSetId;
-            Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
-            Query.Params.ParamByName('description').AsString :=
-              MealSetObj.Get('description', '');
-            Query.Params.ParamByName('available').AsBoolean :=
-              MealSetObj.Get('available', True);
-            Query.Params.ParamByName('sort_order').AsInteger :=
-              MealSetObj.Get('sort_order', 0);
-            Query.ExecSQL;
-
-            if Query.RowsAffected = 0 then
-            begin
-              SendJSONResponse(AResponse, '{"error":"Meal set not found"}', 404);
-              Exit;
-            end;
-
-            if MealSetObj.Find('ingredients', IngredientsArray) then
-            begin
-              Query.SQL.Text :=
-                'DELETE FROM meal_set_ingredients WHERE meal_set_id = :id';
-              Query.Params.ParamByName('id').AsInteger := MealSetId;
-              Query.ExecSQL;
-
-              for i := 0 to IngredientsArray.Count - 1 do
-              begin
-                IngredientObj := IngredientsArray.Objects[i];
-                Query.SQL.Text :=
-                  'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id, quantity) '
-                  + 'VALUES (:meal_set_id, :ingredient_id, :quantity)';
-                Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-                Query.Params.ParamByName('ingredient_id').AsInteger :=
-                  IngredientObj.Get('ingredient_id', 0);
-                Query.Params.ParamByName('quantity').AsInteger :=
-                  IngredientObj.Get('quantity', 1);
-                Query.ExecSQL;
-              end;
-            end;
-
-            SendJSONResponse(AResponse, '{"success":true,"message":"Meal set updated"}');
-          finally
-            Query.Free;
-          end;
-          RequestData.Free;
-        end;
-
-        'DELETE':
-        begin
-          if not IsValidResourceId(ARequest.PathInfo, 3) then
-          begin
-            SendJSONResponse(AResponse, '{"error":"Invalid meal set ID"}', 400);
-            Exit;
-          end;
-          MealSetId := ExtractResourceId(ARequest.PathInfo, 3);
 
           Query := TZQuery.Create(nil);
           try
@@ -1049,180 +1349,207 @@ type
     end;
   end;
 
- procedure TOrderAPIHandler.HandleAdminInventory(ARequest: TRequest; AResponse: TResponse);
-var
-  RequestData: TJSONData;
-  InventoryObj, UpdateObj: TJSONObject;
-  UpdatesArray: TJSONArray;
-  SubPath: string;
-  Query: TZQuery;
-  Inventory: TJSONArray;
-  PathParts: TStringArray;
-  i: integer;
-begin
-  WriteLn('Admin Inventory request: ', ARequest.Method, ' ', ARequest.PathInfo);
-
-  if not ValidateAdminAccess(ARequest) then
+  procedure TOrderAPIHandler.HandleAdminInventory(ARequest: TRequest;
+    AResponse: TResponse);
+  var
+    RequestData: TJSONData;
+    InventoryObj, UpdateObj: TJSONObject;
+    UpdatesArray: TJSONArray;
+    SubPath: string;
+    Query: TZQuery;
+    Inventory: TJSONArray;
+    PathParts: TStringArray;
+    i: integer;
   begin
-    SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
-    Exit;
-  end;
+    WriteLn('Admin Inventory request: ', ARequest.Method, ' ', ARequest.PathInfo);
 
-  try
-    PathParts := SplitString(ARequest.PathInfo, '/');
-    if Length(PathParts) >= 5 then
-      SubPath := PathParts[4]  // /api/admin/inventory/bulk -> PathParts[4] = "bulk"
-    else
-      SubPath := '';
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
-    WriteLn('SubPath extracted: "', SubPath, '"');
+    if not ValidateAdminAccess(ARequest) then
+    begin
+      SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
+      Exit;
+    end;
 
-    case ARequest.Method of
-      'GET':
-      begin
-        case SubPath of
-          'warnings':
-            Inventory := FDB.QueryJSON(
-              'SELECT i.id, i.name, i.stock_quantity, i.min_warning_level, i.sold_today, ' +
-              'c.name as category_name FROM ingredients i ' +
-              'LEFT JOIN categories c ON i.category_id = c.id ' +
-              'WHERE i.track_inventory = 1 AND i.stock_quantity <= i.min_warning_level ' +
-              'ORDER BY i.stock_quantity ASC');
-          'history':
-            Inventory := FDB.QueryJSON(
-              'SELECT i.name, i.sold_today, i.max_daily_limit, ' +
-              '(i.max_daily_limit - i.sold_today) as remaining_today, ' +
-              'c.name as category_name FROM ingredients i ' +
-              'LEFT JOIN categories c ON i.category_id = c.id ' +
-              'WHERE i.track_inventory = 1 ' +
-              'ORDER BY i.sold_today DESC');
-          else
-            Inventory := FDB.QueryJSON(
-              'SELECT i.id, i.name, i.price, i.stock_quantity, i.min_warning_level, ' +
-              'i.max_daily_limit, i.track_inventory, i.sold_today, i.available, ' +
-              'c.name as category_name, ' +
-              'CASE WHEN i.track_inventory = 1 AND i.stock_quantity <= i.min_warning_level THEN 1 ELSE 0 END as is_warning, ' +
-              'CASE WHEN i.track_inventory = 1 AND i.stock_quantity = 0 THEN 1 ELSE 0 END as is_out_of_stock ' +
-              'FROM ingredients i ' +
-              'LEFT JOIN categories c ON i.category_id = c.id ' +
-              'ORDER BY i.category_id, i.name');
-        end;
+    try
+      PathParts := SplitString(ARequest.PathInfo, '/');
+      if Length(PathParts) >= 5 then
+        SubPath := PathParts[4]  // /api/admin/inventory/bulk -> PathParts[4] = "bulk"
+      else
+        SubPath := '';
 
-        SendJSONResponse(AResponse, Inventory.AsJSON);
-        Inventory.Free;
-      end;
+      WriteLn('SubPath extracted: "', SubPath, '"');
 
-      'PUT':
-      begin
-        if ARequest.Content = '' then
+      case ARequest.Method of
+        'GET':
         begin
-          SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
-          Exit;
+          case SubPath of
+            'warnings':
+              Inventory := FDB.QueryJSON(
+                'SELECT i.id, i.name, i.stock_quantity, i.min_warning_level, i.sold_today, '
+                + 'c.name as category_name FROM ingredients i ' +
+                'LEFT JOIN categories c ON i.category_id = c.id ' +
+                'WHERE i.track_inventory = 1 AND i.stock_quantity <= i.min_warning_level '
+                + 'ORDER BY i.stock_quantity ASC');
+            'history':
+              Inventory := FDB.QueryJSON(
+                'SELECT i.name, i.sold_today, i.max_daily_limit, ' +
+                '(i.max_daily_limit - i.sold_today) as remaining_today, ' +
+                'c.name as category_name FROM ingredients i ' +
+                'LEFT JOIN categories c ON i.category_id = c.id ' +
+                'WHERE i.track_inventory = 1 ' +
+                'ORDER BY i.sold_today DESC');
+            else
+              Inventory := FDB.QueryJSON(
+                'SELECT i.id, i.name, i.price, i.stock_quantity, i.min_warning_level, ' +
+                'i.max_daily_limit, i.track_inventory, i.sold_today, i.available, ' +
+                'c.name as category_name, ' +
+                'CASE WHEN i.track_inventory = 1 AND i.stock_quantity <= i.min_warning_level THEN 1 ELSE 0 END as is_warning, '
+                +
+                'CASE WHEN i.track_inventory = 1 AND i.stock_quantity = 0 THEN 1 ELSE 0 END as is_out_of_stock '
+                + 'FROM ingredients i ' +
+                'LEFT JOIN categories c ON i.category_id = c.id ' +
+                'ORDER BY i.category_id, i.name');
+          end;
+
+          SendJSONResponse(AResponse, Inventory.AsJSON);
+          Inventory.Free;
         end;
 
-        try
-          RequestData := GetJSON(ARequest.Content);
-        except
-          on E: Exception do
+        'PUT':
+        begin
+          if ARequest.Content = '' then
           begin
-            SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' + E.Message + '"}', 400);
+            SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
             Exit;
           end;
-        end;
 
-        if not (RequestData is TJSONObject) then
-        begin
-          SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
-          RequestData.Free;
-          Exit;
-        end;
-
-        InventoryObj := RequestData as TJSONObject;
-
-        case SubPath of
-          'bulk':
-          begin
-            if not InventoryObj.Find('updates', UpdatesArray) then
+          try
+            RequestData := GetJSON(ARequest.Content);
+          except
+            on E: Exception do
             begin
-              SendJSONResponse(AResponse, '{"error":"No updates array provided"}', 400);
-              RequestData.Free;
+              SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' +
+                E.Message + '"}', 400);
               Exit;
             end;
+          end;
 
-            Query := TZQuery.Create(nil);
-            try
-              Query.Connection := FDB.FConnection;
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
+            RequestData.Free;
+            Exit;
+          end;
 
-              for i := 0 to UpdatesArray.Count - 1 do
+          InventoryObj := RequestData as TJSONObject;
+
+          case SubPath of
+            'bulk':
+            begin
+              if not InventoryObj.Find('updates', UpdatesArray) then
               begin
-                UpdateObj := UpdatesArray.Objects[i];
-                Query.SQL.Text :=
-                  'UPDATE ingredients SET stock_quantity = :stock_quantity, ' +
-                  'min_warning_level = :min_warning_level, max_daily_limit = :max_daily_limit, ' +
-                  'track_inventory = :track_inventory WHERE id = :id';
-                Query.Params.ParamByName('id').AsInteger := UpdateObj.Get('id', 0);
-                Query.Params.ParamByName('stock_quantity').AsInteger := UpdateObj.Get('stock_quantity', 0);
-                Query.Params.ParamByName('min_warning_level').AsInteger := UpdateObj.Get('min_warning_level', 5);
-                Query.Params.ParamByName('max_daily_limit').AsInteger := UpdateObj.Get('max_daily_limit', 0);
-                Query.Params.ParamByName('track_inventory').AsBoolean := UpdateObj.Get('track_inventory', False);
-                Query.ExecSQL;
+                SendJSONResponse(AResponse,
+                  '{"error":"No updates array provided"}', 400);
+                RequestData.Free;
+                Exit;
               end;
 
-              SendJSONResponse(AResponse, '{"success":true,"message":"Inventory updated","updated":' + IntToStr(UpdatesArray.Count) + '}');
-            finally
-              Query.Free;
+              Query := TZQuery.Create(nil);
+              try
+                Query.Connection := FDB.FConnection;
+
+                for i := 0 to UpdatesArray.Count - 1 do
+                begin
+                  UpdateObj := UpdatesArray.Objects[i];
+                  Query.SQL.Text :=
+                    'UPDATE ingredients SET stock_quantity = :stock_quantity, ' +
+                    'min_warning_level = :min_warning_level, max_daily_limit = :max_daily_limit, '
+                    + 'track_inventory = :track_inventory WHERE id = :id';
+                  Query.Params.ParamByName('id').AsInteger := UpdateObj.Get('id', 0);
+                  Query.Params.ParamByName('stock_quantity').AsInteger :=
+                    UpdateObj.Get('stock_quantity', 0);
+                  Query.Params.ParamByName('min_warning_level').AsInteger :=
+                    UpdateObj.Get('min_warning_level', 5);
+                  Query.Params.ParamByName('max_daily_limit').AsInteger :=
+                    UpdateObj.Get('max_daily_limit', 0);
+                  Query.Params.ParamByName('track_inventory').AsBoolean :=
+                    UpdateObj.Get('track_inventory', False);
+                  Query.ExecSQL;
+                end;
+
+                SendJSONResponse(AResponse,
+                  '{"success":true,"message":"Inventory updated","updated":' +
+                  IntToStr(UpdatesArray.Count) + '}');
+              finally
+                Query.Free;
+              end;
             end;
-          end;
-          'reset':
-          begin
-            Query := TZQuery.Create(nil);
-            try
-              Query.Connection := FDB.FConnection;
-              Query.SQL.Text := 'UPDATE ingredients SET sold_today = 0 WHERE track_inventory = 1';
-              Query.ExecSQL;
-              SendJSONResponse(AResponse, '{"success":true,"message":"Daily counters reset","affected":' + IntToStr(Query.RowsAffected) + '}');
-            finally
-              Query.Free;
+            'reset':
+            begin
+              Query := TZQuery.Create(nil);
+              try
+                Query.Connection := FDB.FConnection;
+                Query.SQL.Text :=
+                  'UPDATE ingredients SET sold_today = 0 WHERE track_inventory = 1';
+                Query.ExecSQL;
+                SendJSONResponse(AResponse,
+                  '{"success":true,"message":"Daily counters reset","affected":' +
+                  IntToStr(Query.RowsAffected) + '}');
+              finally
+                Query.Free;
+              end;
             end;
+            else
+              SendJSONResponse(AResponse,
+                '{"error":"Invalid inventory operation"}', 400);
           end;
-          else
-            SendJSONResponse(AResponse, '{"error":"Invalid inventory operation"}', 400);
+
+          RequestData.Free;
         end;
 
-        RequestData.Free;
-      end;
+        'POST':
+        begin
+          case SubPath of
+            'reset':
+            begin
+              Query := TZQuery.Create(nil);
+              try
+                Query.Connection := FDB.FConnection;
+                Query.SQL.Text :=
+                  'UPDATE ingredients SET sold_today = 0 WHERE track_inventory = 1';
+                Query.ExecSQL;
+                SendJSONResponse(AResponse,
+                  '{"success":true,"message":"Daily counters reset","affected":' +
+                  IntToStr(Query.RowsAffected) + '}');
+              finally
+                Query.Free;
+              end;
+            end;
+            else
+              SendJSONResponse(AResponse,
+                '{"error":"Invalid inventory operation"}', 400);
+          end;
+        end;
 
-      'POST':
+        else
+          SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
+      end;
+    except
+      on E: Exception do
       begin
-        case SubPath of
-          'reset':
-          begin
-            Query := TZQuery.Create(nil);
-            try
-              Query.Connection := FDB.FConnection;
-              Query.SQL.Text := 'UPDATE ingredients SET sold_today = 0 WHERE track_inventory = 1';
-              Query.ExecSQL;
-              SendJSONResponse(AResponse, '{"success":true,"message":"Daily counters reset","affected":' + IntToStr(Query.RowsAffected) + '}');
-            finally
-              Query.Free;
-            end;
-          end;
-          else
-            SendJSONResponse(AResponse, '{"error":"Invalid inventory operation"}', 400);
-        end;
+        WriteLn('Error in HandleAdminInventory: ', E.Message);
+        SendJSONResponse(AResponse, '{"error":"Database error: ' +
+          E.Message + '"}', 500);
       end;
-
-      else
-        SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
-    end;
-  except
-    on E: Exception do
-    begin
-      WriteLn('Error in HandleAdminInventory: ', E.Message);
-      SendJSONResponse(AResponse, '{"error":"Database error: ' + E.Message + '"}', 500);
     end;
   end;
-end;
 
   // Public Handler Methods
   procedure TOrderAPIHandler.HandleHealth(ARequest: TRequest; AResponse: TResponse);
@@ -1237,7 +1564,7 @@ end;
       HealthObj.Add('message', 'Server is running and healthy');
       HealthObj.Add('timestamp', DateTimeToStr(Now));
       HealthObj.Add('platform', {$I %FPCTARGETOS%});
-      HealthObj.Add('version', '0.5.0');
+      HealthObj.Add('version', '0.7.1');
       HealthObj.Add('database', 'connected');
       SendJSONResponse(AResponse, HealthObj.AsJSON);
     finally
@@ -1252,6 +1579,15 @@ end;
     StatusSegment: string;
   begin
     WriteLn('Orders request: ', ARequest.Method, ' ', ARequest.PathInfo);
+
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     try
       // Check if this is a status update request
@@ -1310,6 +1646,15 @@ end;
   begin
     WriteLn('Tables request from: ', ARequest.RemoteAddress);
 
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
     try
       Tables := FDB.QueryJSON(
         'SELECT table_number, table_name, active FROM tables WHERE active = 1');
@@ -1329,7 +1674,14 @@ end;
     Categories: TJSONArray;
   begin
     WriteLn('Categories request from: ', ARequest.RemoteAddress);
-
+    // OPTIONS für CORS Preflight
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
     try
       if ARequest.Method = 'GET' then
       begin
@@ -1362,7 +1714,14 @@ end;
     CategorySegment: string;
   begin
     WriteLn('Ingredients request: ', ARequest.PathInfo);
-
+    // OPTIONS für CORS Preflight
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
     try
       if ARequest.Method = 'GET' then
       begin
@@ -1407,6 +1766,14 @@ end;
   begin
     WriteLn('MealSets request from: ', ARequest.RemoteAddress);
 
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
     try
       if ARequest.Method = 'GET' then
       begin
@@ -1437,6 +1804,16 @@ end;
     Details: TJSONArray;
   begin
     WriteLn('MealSet Details request: ', ARequest.PathInfo);
+
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
 
     try
       if ARequest.Method <> 'GET' then
@@ -1482,6 +1859,15 @@ end;
     StatsType: string;
   begin
     WriteLn('Stats request: ', ARequest.PathInfo);
+
+    // OPTIONS für CORS Preflight
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     try
       if ARequest.Method <> 'GET' then
@@ -1543,6 +1929,16 @@ end;
   begin
     WriteLn('Dishes request from: ', ARequest.RemoteAddress);
 
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
+
     try
       if ARequest.Method = 'GET' then
       begin
@@ -1577,6 +1973,15 @@ end;
     Query: TZQuery;
   begin
     WriteLn('Create Order request from: ', ARequest.RemoteAddress);
+
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     try
       if ARequest.Method <> 'POST' then
@@ -1693,6 +2098,15 @@ end;
   begin
     WriteLn('Update Order Status request: ', ARequest.PathInfo);
 
+    // OPTIONS für CORS Preflight - HINZUFÜGEN!
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
     try
       if ARequest.Method <> 'PUT' then
       begin
@@ -1791,7 +2205,7 @@ end;
     InfoObj := TJSONObject.Create;
     try
       InfoObj.Add('service', 'Order Management API');
-      InfoObj.Add('version', '0.5.0');
+      InfoObj.Add('version', '0.7.1');
       InfoObj.Add('status', 'running');
       InfoObj.Add('endpoints', TJSONArray.Create(['/api/health',
         '/api/orders', '/api/tables']));
@@ -1807,6 +2221,15 @@ end;
   begin
     WriteLn('Default handler - unmatched route: "', ARequest.PathInfo,
       '" from: ', ARequest.RemoteAddress);
+
+    // OPTIONS-Request für CORS Preflight (alle Pfade)
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
 
     ErrorObj := TJSONObject.Create;
     try
@@ -1826,17 +2249,19 @@ end;
 var
   APIHandler: TOrderAPIHandler;
 
+  {$R *.res}
+
 begin
-  {$IFDEF UNIX}
-  ExitCode := 0;
-  Signal(SIGINT, SIG_DFL);
-  {$ENDIF}
+  //{$IFDEF UNIX}
+  //ExitCode := 0;
+  //Signal(SIGINT, SIG_DFL);
+  //{$ENDIF}
 
   WriteLn('=================================');
   WriteLn('Order Management System Server');
   WriteLn('Platform: ', {$I %FPCTARGETOS%});
   WriteLn('Architecture: ', {$I %FPCTARGETCPU%});
-  WriteLn('Version: 0.5.0');
+  WriteLn('Version: 0.7.1');
   WriteLn('=================================');
 
   APIHandler := TOrderAPIHandler.Create;
@@ -1858,6 +2283,10 @@ begin
     HTTPRouter.RegisterRoute('/api/meal-sets/*', @APIHandler.HandleMealSetDetails);
     HTTPRouter.RegisterRoute('/api/stats', @APIHandler.HandleStats);
     HTTPRouter.RegisterRoute('/api/stats/*', @APIHandler.HandleStats);
+    HTTPRouter.RegisterRoute('/api/admin/radio-groups',
+      @APIHandler.HandleAdminRadioGroups);
+    HTTPRouter.RegisterRoute('/api/admin/radio-groups/*',
+      @APIHandler.HandleAdminRadioGroups);
 
     HTTPRouter.RegisterRoute('/api/admin/categories', @APIHandler.HandleAdminCategories);
     HTTPRouter.RegisterRoute('/api/admin/categories/*',
@@ -1912,903 +2341,4 @@ begin
     APIHandler.Free;
 
   WriteLn('Server stopped.');
-end.program OrderServer;
-{$mode objfpc}{$H+}uses
-{$IFDEF UNIX}
-  cthreads,
-{$ENDIF}  Classes,
-FileInfo,
-SysUtils,
-fphttpapp,
-httpdefs,
-httproute,
-fpjson,
-jsonparser,
-ZConnection,
-ZDataset,
-ZSqlUpdate,
-ZDbcIntfs,
-DB,
-strutils;
-type
-TDatabaseManager = class
-private
-FConnection: TZConnection;
-procedure InitializeDatabase;
-procedure CreateTables;
-public
-constructor Create;
-destructor Destroy;
-override;
-function QueryJSON(const SQL: string): TJSONArray;
-procedure ExecuteSQL(const SQL: string);
-end;
-TOrderAPIHandler = class
-private
-FDB: TDatabaseManager;
-// Helper functions    function ExtractResourceId(const PathInfo: string;ResourcePosition:
-integer = 3): integer;
-function GetPathSegment(
-const PathInfo: string;
-SegmentIndex: integer): string;
-function IsValidResourceId(
-const PathInfo: string;
-ResourcePosition: integer = 3): boolean;
-// Core functions    function GenerateOrderNumber: string;function GenerateQRCode(const
-OrderNumber: string): string;
-function ValidateAdminAccess(ARequest: TRequest): boolean;
-// Handler methods    procedure HandleAdminCategories(ARequest: TRequest;AResponse:TResponse);
-procedure HandleAdminIngredients(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleAdminInventory(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleAdminMealSets(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleCategories(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleCreateOrder(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleDishes(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleIngredients(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleMealSetDetails(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleMealSets(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleStats(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleUpdateOrderStatus(ARequest: TRequest;
-AResponse: TResponse);
-public
-constructor Create;
-destructor Destroy;
-override;
-procedure HandleHealth(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleOrders(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleTables(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleRoot(ARequest: TRequest;
-AResponse: TResponse);
-procedure HandleDefault(ARequest: TRequest;
-AResponse: TResponse);
-procedure SetCORSHeaders(AResponse: TResponse);
-procedure SendJSONResponse(AResponse: TResponse;
-const AData: string;
-AStatusCode: integer = 200);
-end;
-// Database Manager Implementationconstructor TDatabaseManager.Create;begin
-inherited Create;
-FConnection := TZConnection.Create(nil);
-FConnection.Protocol := 'sqlite';
-FConnection.Database := 'orders.db';
-FConnection.LibraryLocation := 'sqlite3.dll';
-try
-FConnection.Connect;
-WriteLn('Database connected successfully');
-InitializeDatabase;
-except
-on E: Exception do
-begin
-WriteLn('Database connection failed: ', E.Message);
-raise;
-end;
-end;
-end;
-destructor TDatabaseManager.Destroy;
-begin
-if Assigned(FConnection) then
-begin
-if FConnection.Connected then
-FConnection.Disconnect;
-FConnection.Free;
-end;
-inherited Destroy;
-end;
-procedure TDatabaseManager.ExecuteSQL(const SQL: string);
-var
-Query: TZQuery;
-begin
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FConnection;
-Query.SQL.Text := SQL;
-Query.ExecSQL;
-finally
-Query.Free;
-end;
-end;
-function TDatabaseManager.QueryJSON(const SQL: string): TJSONArray;
-var
-Query: TZQuery;
-Row: TJSONObject;
-i: integer;
-begin
-Result := TJSONArray.Create;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FConnection;
-Query.SQL.Text := SQL;
-Query.Open;
-while not Query.EOF do
-begin
-Row := TJSONObject.Create;
-for i := 0 to Query.Fields.Count - 1 do
-begin
-if Query.Fields[i].IsNull then
-Row.Add(Query.Fields[i].FieldName, TJSONNull.Create)
-else
-begin
-case Query.Fields[i].DataType of
-ftInteger, ftSmallint, ftWord, ftLargeint:
-Row.Add(Query.Fields[i].FieldName, Query.Fields[i].AsInteger);
-ftFloat, ftCurrency, ftBCD, ftFMTBcd: Row.Add(
-Query.Fields[i].FieldName, Query.Fields[i].AsFloat);
-ftBoolean: Row.Add(Query.Fields[i].FieldName,
-Query.Fields[i].AsBoolean);
-ftDateTime, ftDate, ftTime, ftTimeStamp:
-Row.Add(Query.Fields[i].FieldName,
-DateTimeToStr(Query.Fields[i].AsDateTime));
-else
-Row.Add(Query.Fields[i].FieldName, Query.Fields[i].AsString);
-end;
-end;
-end;
-Result.Add(Row);
-Query.Next;
-end;
-finally
-Query.Free;
-end;
-end;
-procedure TDatabaseManager.CreateTables;
-begin
-// Tables configuration  ExecuteSQL('CREATE TABLE IF NOT EXISTS tables (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  table_number TEXT UNIQUE NOT NULL,' +
-'  table_name TEXT,' +
-'  active BOOLEAN DEFAULT 1' +
-')');
-// Categories  ExecuteSQL('CREATE TABLE IF NOT EXISTS categories (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  name TEXT NOT NULL,' +
-'  color_bg_inactive TEXT DEFAULT ''#83BCBA'',' +
-'  color_bg_active TEXT DEFAULT ''#99E0F3'',' +
-'  color_font_inactive TEXT DEFAULT ''#000000'',' +
-'  color_font_active TEXT DEFAULT ''#FFFFFF'',' +
-'  sort_order INTEGER DEFAULT 0' +
-')');
-// Meal sets  ExecuteSQL('CREATE TABLE IF NOT EXISTS meal_sets (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  name TEXT NOT NULL,' +
-'  description TEXT,' +
-'  available BOOLEAN DEFAULT 1,' +
-'  sort_order INTEGER DEFAULT 0,' +
-'  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' +
-')');
-// Ingredients - KORRIGIERT: Inventar-Spalten hinzugefügt  ExecuteSQL(
-'CREATE TABLE IF NOT EXISTS ingredients (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  name TEXT NOT NULL,' +
-'  price DECIMAL(10,2) NOT NULL,' +
-'  category_id INTEGER,' +
-'  available BOOLEAN DEFAULT 1,' +
-'  sort_order INTEGER DEFAULT 0,' +
-'  stock_quantity INTEGER DEFAULT 0,' +
-'  min_warning_level INTEGER DEFAULT 5,' +
-'  max_daily_limit INTEGER DEFAULT 0,' +
-'  track_inventory BOOLEAN DEFAULT 0,' +
-'  sold_today INTEGER DEFAULT 0,' +
-'  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' +
-')');
-// Meal set ingredients mapping  ExecuteSQL('CREATE TABLE IF NOT EXISTS meal_set_ingredients ('
-+
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  meal_set_id INTEGER NOT NULL,' +
-'  ingredient_id INTEGER NOT NULL,' +
-'  quantity INTEGER DEFAULT 1' +
-')');
-// Orders  ExecuteSQL('CREATE TABLE IF NOT EXISTS orders (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  order_number TEXT UNIQUE NOT NULL,' +
-'  table_number TEXT,' +
-'  status TEXT DEFAULT ''pending'',' +
-'  total_amount DECIMAL(10,2) DEFAULT 0,' +
-'  note TEXT,' +
-'  qr_code TEXT,' +
-'  meal_set_id INTEGER,' +
-'  is_custom BOOLEAN DEFAULT 0,' +
-'  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,' +
-'  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP' +
-')');
-// Order items  ExecuteSQL('CREATE TABLE IF NOT EXISTS order_items (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  order_id INTEGER NOT NULL,' +
-'  ingredient_id INTEGER,' +
-'  ingredient_name TEXT NOT NULL,' +
-'  quantity INTEGER NOT NULL DEFAULT 1,' +
-'  unit_price DECIMAL(10,2) NOT NULL,' +
-'  total_price DECIMAL(10,2) NOT NULL,' +
-'  note TEXT,' +
-'  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' +
-')');
-// Legacy dishes  ExecuteSQL('CREATE TABLE IF NOT EXISTS dishes (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  name TEXT NOT NULL,' +
-'  description TEXT,' +
-'  price DECIMAL(10,2) NOT NULL,' +
-'  category TEXT NOT NULL,' +
-'  available BOOLEAN DEFAULT 1,' +
-'  sort_order INTEGER DEFAULT 0,' +
-'  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' +
-')');
-// Statistics tables  ExecuteSQL('CREATE TABLE IF NOT EXISTS ingredient_stats (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  ingredient_id INTEGER NOT NULL,' +
-'  date DATE DEFAULT (date(''now'')),' +
-'  count INTEGER DEFAULT 0,' +
-'  UNIQUE(ingredient_id, date)' +
-')');
-ExecuteSQL(
-'CREATE TABLE IF NOT EXISTS meal_set_stats (' +
-'  id INTEGER PRIMARY KEY AUTOINCREMENT,' +
-'  meal_set_id INTEGER NOT NULL,' +
-'  date DATE DEFAULT (date(''now'')),' +
-'  count INTEGER DEFAULT 0,' +
-'  UNIQUE(meal_set_id, date)' +
-')');
-// Insert sample data  ExecuteSQL(
-'INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''1'', ''Tisch 1'')');
-ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''2'', ''Tisch 2'')');
-ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''3'', ''Tisch 3'')');
-ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''4'', ''Tisch 4'')');
-ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''5'', ''Tisch 5'')');
-ExecuteSQL('INSERT OR IGNORE INTO tables (table_number, table_name) VALUES (''takeaway'', ''Take-Away'')');
-// Categories  ExecuteSQL(
-'INSERT OR IGNORE INTO categories (id, name, color_bg_inactive, color_bg_active, color_font_active) VALUES (1, ''Brot & Brötchen'', ''#33B1E4'', ''#1A3DC7'', ''#FFFFFF'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO categories (id, name, color_bg_inactive, color_bg_active, color_font_active) VALUES (2, ''Soßen & Beilagen'', ''#83BCBA'', ''#1A3DC7'', ''#FFFFFF'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO categories (id, name, color_bg_inactive, color_bg_active, color_font_active) VALUES (3, ''Schlachtplatte'', ''#B0EDEA'', ''#1A3DC7'', ''#FFFFFF'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO categories (id, name, color_bg_inactive, color_bg_active, color_font_active) VALUES (4, ''Hauptgerichte'', ''#6DB58B'', ''#1A3DC7'', ''#FFFFFF'')');
-// Ingredients  ExecuteSQL(
-'INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (1, ''Brötchen'', 0.60, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (2, ''Brot'', 0.60, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (3, ''Kartoffelsalat'', 2.00, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (4, ''Jäger'', 0.70, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (5, ''Sauerkraut'', 2.00, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (6, ''Zwiebeln'', 0.70, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (7, ''1x Leberwurst'', 1.60, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (8, ''2x Leberwurst'', 3.20, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (9, ''1x Blutwurst'', 1.60, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (10, ''2x Blutwurst'', 3.20, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (11, ''1x Schwartenmagen'', 3.00, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (12, ''2x Schwartenmagen'', 6.00, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (13, ''1x Wellfleisch'', 3.20, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (14, ''2x Wellfleisch'', 6.40, 3)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (15, ''Chilli'', 8.00, 4)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (16, ''Bratwurst'', 2.40, 4)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (17, ''Schnitzel'', 9.70, 4)');
-ExecuteSQL('INSERT OR IGNORE INTO ingredients (id, name, price, category_id) VALUES (18, ''Gehacktes'', 8.20, 4)');
-// Meal sets  ExecuteSQL(
-'INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (1, ''Gehacktes'', ''Gehacktes mit Brötchen'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (2, ''Schlachtplatte'', ''Traditionelle Schlachtplatte'')');
-ExecuteSQL('INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (3, ''Schnitzel'', ''Schnitzel mit Brötchen'')');
-ExecuteSQL('INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (4, ''Bratwurst'', ''Bratwurst mit Brötchen'')');
-ExecuteSQL('INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (5, ''Chilli'', ''Chilli sin Carne mit Brötchen'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO meal_sets (id, name, description) VALUES (6, ''Wellfleisch'', ''Wellfleisch mit Brot und Sauerkraut'')');
-// Meal set ingredients mapping  ExecuteSQL(
-'INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (1, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (1, 18)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 5)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 7)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 9)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 11)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (2, 13)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (3, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (3, 17)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (4, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (4, 16)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (5, 1)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (5, 15)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (6, 2)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (6, 5)');
-ExecuteSQL('INSERT OR IGNORE INTO meal_set_ingredients (meal_set_id, ingredient_id) VALUES (6, 14)');
-// Sample inventory  ExecuteSQL(
-'UPDATE ingredients SET stock_quantity = 100, min_warning_level = 10, max_daily_limit = 90, track_inventory = 1 WHERE name = ''Bratwurst''');
-ExecuteSQL(
-'UPDATE ingredients SET stock_quantity = 50, min_warning_level = 5, max_daily_limit = 40, track_inventory = 1 WHERE name = ''Schnitzel''');
-ExecuteSQL(
-'UPDATE ingredients SET stock_quantity = 80, min_warning_level = 8, max_daily_limit = 70, track_inventory = 1 WHERE name = ''Gehacktes''');
-// Legacy dishes  ExecuteSQL(
-'INSERT OR IGNORE INTO dishes (id, name, description, price, category) VALUES (1, ''Bratwurst'', ''Klassische Bratwurst vom Grill'', 3.50, ''Hauptgerichte'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO dishes (id, name, description, price, category) VALUES (2, ''Currywurst'', ''Bratwurst mit Curry-Sauce'', 4.00, ''Hauptgerichte'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO dishes (id, name, description, price, category) VALUES (3, ''Pommes'', ''Knusprige Pommes frites'', 2.50, ''Beilagen'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO dishes (id, name, description, price, category) VALUES (4, ''Bier 0,5l'', ''Kühles Bier vom Fass'', 3.00, ''Getränke'')');
-ExecuteSQL(
-'INSERT OR IGNORE INTO dishes (id, name, description, price, category) VALUES (5, ''Cola 0,3l'', ''Erfrischende Cola'', 2.00, ''Getränke'')');
-WriteLn('Database schema created successfully');
-end;
-procedure TDatabaseManager.InitializeDatabase;
-begin
-WriteLn('Initializing database schema...');
-CreateTables;
-WriteLn('Database initialization complete');
-end;
-// API Handler Implementationconstructor TOrderAPIHandler.Create;begininherited Create;
-FDB := TDatabaseManager.Create;
-end;
-destructor TOrderAPIHandler.Destroy;
-begin
-if Assigned(FDB) then
-FDB.Free;
-inherited Destroy;
-end;
-procedure TOrderAPIHandler.SetCORSHeaders(AResponse: TResponse);
-begin
-AResponse.SetCustomHeader('Access-Control-Allow-Origin', '*');
-AResponse.SetCustomHeader('Access-Control-Allow-Methods',
-'GET, POST, PUT, DELETE, OPTIONS');
-AResponse.SetCustomHeader('Access-Control-Allow-Headers',
-'Content-Type, Authorization');
-end;
-procedure TOrderAPIHandler.SendJSONResponse(AResponse: TResponse;
-const AData: string;
-AStatusCode: integer);
-begin
-SetCORSHeaders(AResponse);
-AResponse.ContentType := 'application/json; charset=utf-8';
-AResponse.Code := AStatusCode;
-AResponse.Content := AData;
-end;
-// Helper Functions Implementationfunction TOrderAPIHandler.ExtractResourceId(constPathInfo:
-string;
-ResourcePosition: integer): integer;
-var
-PathParts: TStringArray;
-begin
-Result := -1;
-PathParts := SplitString(PathInfo, '/');
-if (Length(PathParts) > ResourcePosition) and
-TryStrToInt(PathParts[ResourcePosition], Result) then
-// Result already set  elseResult := -1;end;
-function TOrderAPIHandler.GetPathSegment(const PathInfo: string;
-SegmentIndex: integer): string;
-var
-PathParts: TStringArray;
-begin
-Result := '';
-PathParts := SplitString(PathInfo, '/');
-if (SegmentIndex >= 0) and (SegmentIndex < Length(PathParts)) then
-Result := PathParts[SegmentIndex];
-end;
-function TOrderAPIHandler.IsValidResourceId(const PathInfo: string;
-ResourcePosition: integer): boolean;
-begin
-Result := ExtractResourceId(PathInfo, ResourcePosition) > 0;
-end;
-function TOrderAPIHandler.GenerateOrderNumber: string;
-var
-Counter: integer;
-Query: TZQuery;
-begin
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'SELECT COUNT(*) as count FROM orders WHERE DATE(created_at) = DATE(''now'')';
-Query.Open;
-Counter := Query.FieldByName('count').AsInteger + 1;
-Result := FormatDateTime('yyyymmdd', Now) + '-' + Format('%.3d', [Counter]);
-finally
-Query.Free;
-end;
-end;
-function TOrderAPIHandler.GenerateQRCode(const OrderNumber: string): string;
-begin
-Result := '{"order":"' + OrderNumber + '","type":"order_qr"}';
-end;
-function TOrderAPIHandler.ValidateAdminAccess(ARequest: TRequest): boolean;
-begin
-Result := True; // Development phase - allow all accessend;
-// Handler Methods - Fixed ImplementationprocedureTOrderAPIHandler.HandleAdminCategories(
-ARequest: TRequest;
-AResponse: TResponse);
-var
-RequestData: TJSONData;
-CategoryObj: TJSONObject;
-CategoryId: integer;
-Query: TZQuery;
-Categories: TJSONArray;
-begin
-WriteLn('Admin Categories request: ', ARequest.Method, ' ', ARequest.PathInfo);
-if not ValidateAdminAccess(ARequest) then
-begin
-SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
-Exit;
-end;
-try
-case ARequest.Method of
-'GET': begin
-Categories := FDB.QueryJSON(
-'SELECT * FROM categories ORDER BY sort_order, name');
-SendJSONResponse(AResponse, Categories.AsJSON);
-Categories.Free;
-end;
-'POST': begin
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-CategoryObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'INSERT INTO categories (name, color_bg_inactive, color_bg_active, color_font_inactive, color_font_active, sort_order) VALUES (:name, :bg_inactive, :bg_active, :font_inactive, :font_active, :sort_order)';
-Query.Params.ParamByName('name').AsString := CategoryObj.Get('name', '');
-Query.Params.ParamByName('bg_inactive').AsString :=
-CategoryObj.Get('color_bg_inactive', '#83BCBA');
-Query.Params.ParamByName('bg_active').AsString :=
-CategoryObj.Get('color_bg_active', '#99E0F3');
-Query.Params.ParamByName('font_inactive').AsString :=
-CategoryObj.Get('color_font_inactive', '#000000');
-Query.Params.ParamByName('font_active').AsString :=
-CategoryObj.Get('color_font_active', '#FFFFFF');
-Query.Params.ParamByName('sort_order').AsInteger :=
-CategoryObj.Get('sort_order', 0);
-Query.ExecSQL;
-SendJSONResponse(AResponse,
-'{"success":true,"message":"Category created"}', 201);
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'PUT': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid category ID"}', 400);
-Exit;
-end;
-CategoryId := ExtractResourceId(ARequest.PathInfo, 3);
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-CategoryObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'UPDATE categories SET name = :name, color_bg_inactive = :bg_inactive, color_bg_active = :bg_active, color_font_inactive = :font_inactive, color_font_active = :font_active, sort_order = :sort_order WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := CategoryId;
-Query.Params.ParamByName('name').AsString := CategoryObj.Get('name', '');
-Query.Params.ParamByName('bg_inactive').AsString :=
-CategoryObj.Get('color_bg_inactive', '#83BCBA');
-Query.Params.ParamByName('bg_active').AsString :=
-CategoryObj.Get('color_bg_active', '#99E0F3');
-Query.Params.ParamByName('font_inactive').AsString :=
-CategoryObj.Get('color_font_inactive', '#000000');
-Query.Params.ParamByName('font_active').AsString :=
-CategoryObj.Get('color_font_active', '#FFFFFF');
-Query.Params.ParamByName('sort_order').AsInteger :=
-CategoryObj.Get('sort_order', 0);
-Query.ExecSQL;
-if Query.RowsAffected > 0 then
-SendJSONResponse(AResponse, '{"success":true,"message":"Category updated"}')
-else
-SendJSONResponse(AResponse, '{"error":"Category not found"}', 404);
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'DELETE': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid category ID"}', 400);
-Exit;
-end;
-CategoryId := ExtractResourceId(ARequest.PathInfo, 3);
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'SELECT COUNT(*) as count FROM ingredients WHERE category_id = :id';
-Query.Params.ParamByName('id').AsInteger := CategoryId;
-Query.Open;
-if Query.FieldByName('count').AsInteger > 0 then
-begin
-SendJSONResponse(AResponse,
-'{"error":"Cannot delete category with ingredients"}', 400);
-Exit;
-end;
-Query.Close;
-Query.SQL.Text := 'DELETE FROM categories WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := CategoryId;
-Query.ExecSQL;
-if Query.RowsAffected > 0 then
-SendJSONResponse(AResponse, '{"success":true,"message":"Category deleted"}')
-else
-SendJSONResponse(AResponse, '{"error":"Category not found"}', 404);
-finally
-Query.Free;
-end;
-end;
-else
-SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
-end;
-except
-on E: Exception do
-begin
-WriteLn('Error in HandleAdminCategories: ', E.Message);
-SendJSONResponse(AResponse, '{"error":"Database error: ' + E.Message + '"}', 500);
-end;
-end;
-end;
-procedure TOrderAPIHandler.HandleAdminIngredients(ARequest: TRequest;
-AResponse: TResponse);
-var
-RequestData: TJSONData;
-IngredientObj: TJSONObject;
-IngredientId: integer;
-Query: TZQuery;
-Ingredients: TJSONArray;
-begin
-WriteLn('Admin Ingredients request: ', ARequest.Method, ' ', ARequest.PathInfo);
-if not ValidateAdminAccess(ARequest) then
-begin
-SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
-Exit;
-end;
-try
-case ARequest.Method of
-'GET': begin
-Ingredients := FDB.QueryJSON(
-'SELECT i.*, c.name as category_name FROM ingredients i ' +
-'LEFT JOIN categories c ON i.category_id = c.id ' +
-'ORDER BY i.category_id, i.sort_order, i.name');
-SendJSONResponse(AResponse, Ingredients.AsJSON);
-Ingredients.Free;
-end;
-'POST': begin
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-IngredientObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'INSERT INTO ingredients (name, price, category_id, available, sort_order, ' +
-'stock_quantity, min_warning_level, max_daily_limit, track_inventory) ' +
-'VALUES (:name, :price, :category_id, :available, :sort_order, ' +
-':stock_quantity, :min_warning_level, :max_daily_limit, :track_inventory)';
-Query.Params.ParamByName('name').AsString := IngredientObj.Get('name', '');
-Query.Params.ParamByName('price').AsFloat := IngredientObj.Get('price', 0.0);
-Query.Params.ParamByName('category_id').AsInteger :=
-IngredientObj.Get('category_id', 1);
-Query.Params.ParamByName('available').AsBoolean :=
-IngredientObj.Get('available', True);
-Query.Params.ParamByName('sort_order').AsInteger :=
-IngredientObj.Get('sort_order', 0);
-Query.Params.ParamByName('stock_quantity').AsInteger :=
-IngredientObj.Get('stock_quantity', 0);
-Query.Params.ParamByName('min_warning_level').AsInteger :=
-IngredientObj.Get('min_warning_level', 5);
-Query.Params.ParamByName('max_daily_limit').AsInteger :=
-IngredientObj.Get('max_daily_limit', 0);
-Query.Params.ParamByName('track_inventory').AsBoolean :=
-IngredientObj.Get('track_inventory', False);
-Query.ExecSQL;
-SendJSONResponse(AResponse,
-'{"success":true,"message":"Ingredient created"}', 201);
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'PUT': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid ingredient ID"}', 400);
-Exit;
-end;
-IngredientId := ExtractResourceId(ARequest.PathInfo, 3);
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-IngredientObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'UPDATE ingredients SET name = :name, price = :price, category_id = :category_id, ' +
-'available = :available, sort_order = :sort_order, stock_quantity = :stock_quantity, ' +
-'min_warning_level = :min_warning_level, max_daily_limit = :max_daily_limit, ' +
-'track_inventory = :track_inventory WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := IngredientId;
-Query.Params.ParamByName('name').AsString := IngredientObj.Get('name', '');
-Query.Params.ParamByName('price').AsFloat := IngredientObj.Get('price', 0.0);
-Query.Params.ParamByName('category_id').AsInteger :=
-IngredientObj.Get('category_id', 1);
-Query.Params.ParamByName('available').AsBoolean :=
-IngredientObj.Get('available', True);
-Query.Params.ParamByName('sort_order').AsInteger :=
-IngredientObj.Get('sort_order', 0);
-Query.Params.ParamByName('stock_quantity').AsInteger :=
-IngredientObj.Get('stock_quantity', 0);
-Query.Params.ParamByName('min_warning_level').AsInteger :=
-IngredientObj.Get('min_warning_level', 5);
-Query.Params.ParamByName('max_daily_limit').AsInteger :=
-IngredientObj.Get('max_daily_limit', 0);
-Query.Params.ParamByName('track_inventory').AsBoolean :=
-IngredientObj.Get('track_inventory', False);
-Query.ExecSQL;
-if Query.RowsAffected > 0 then
-SendJSONResponse(AResponse,
-'{"success":true,"message":"Ingredient updated"}')
-else
-SendJSONResponse(AResponse, '{"error":"Ingredient not found"}', 404);
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'DELETE': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid ingredient ID"}', 400);
-Exit;
-end;
-IngredientId := ExtractResourceId(ARequest.PathInfo, 3);
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'SELECT COUNT(*) as count FROM meal_set_ingredients WHERE ingredient_id = :id';
-Query.Params.ParamByName('id').AsInteger := IngredientId;
-Query.Open;
-if Query.FieldByName('count').AsInteger > 0 then
-begin
-SendJSONResponse(AResponse,
-'{"error":"Cannot delete ingredient used in meal sets"}', 400);
-Exit;
-end;
-Query.Close;
-Query.SQL.Text := 'DELETE FROM ingredients WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := IngredientId;
-Query.ExecSQL;
-if Query.RowsAffected > 0 then
-SendJSONResponse(AResponse,
-'{"success":true,"message":"Ingredient deleted"}')
-else
-SendJSONResponse(AResponse, '{"error":"Ingredient not found"}', 404);
-finally
-Query.Free;
-end;
-end;
-else
-SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
-end;
-except
-on E: Exception do
-begin
-WriteLn('Error in HandleAdminIngredients: ', E.Message);
-SendJSONResponse(AResponse, '{"error":"Database error: ' + E.Message + '"}', 500);
-end;
-end;
-end;
-procedure TOrderAPIHandler.HandleAdminMealSets(ARequest: TRequest;
-AResponse: TResponse);
-var
-RequestData: TJSONData;
-MealSetObj: TJSONObject;
-IngredientsArray: TJSONArray;
-IngredientObj: TJSONObject;
-MealSetId: integer;
-Query: TZQuery;
-MealSets: TJSONArray;
-i: integer;
-begin
-WriteLn('Admin MealSets request: ', ARequest.Method, ' ', ARequest.PathInfo);
-if not ValidateAdminAccess(ARequest) then
-begin
-SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
-Exit;
-end;
-try
-case ARequest.Method of
-'GET': begin
-MealSets := FDB.QueryJSON(
-'SELECT ms.*, COUNT(msi.ingredient_id) as ingredient_count ' +
-'FROM meal_sets ms ' +
-'LEFT JOIN meal_set_ingredients msi ON ms.id = msi.meal_set_id ' +
-'GROUP BY ms.id ' +
-'ORDER BY ms.sort_order, ms.name');
-SendJSONResponse(AResponse, MealSets.AsJSON);
-MealSets.Free;
-end;
-'POST': begin
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-MealSetObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'INSERT INTO meal_sets (name, description, available, sort_order) ' +
-'VALUES (:name, :description, :available, :sort_order)';
-Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
-Query.Params.ParamByName('description').AsString :=
-MealSetObj.Get('description', '');
-Query.Params.ParamByName('available').AsBoolean :=
-MealSetObj.Get('available', True);
-Query.Params.ParamByName('sort_order').AsInteger :=
-MealSetObj.Get('sort_order', 0);
-Query.ExecSQL;
-Query.SQL.Text := 'SELECT last_insert_rowid() as id';
-Query.Open;
-MealSetId := Query.Fields[0].AsInteger;
-Query.Close;
-if MealSetObj.Find('ingredients', IngredientsArray) then
-begin
-for i := 0 to IngredientsArray.Count - 1 do
-begin
-IngredientObj := IngredientsArray.Objects[i];
-Query.SQL.Text :=
-'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id, quantity) ' +
-'VALUES (:meal_set_id, :ingredient_id, :quantity)';
-Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-Query.Params.ParamByName('ingredient_id').AsInteger :=
-IngredientObj.Get('ingredient_id', 0);
-Query.Params.ParamByName('quantity').AsInteger :=
-IngredientObj.Get('quantity', 1);
-Query.ExecSQL;
-end;
-end;
-SendJSONResponse(AResponse,
-'{"success":true,"message":"Meal set created","id":' + IntToStr(MealSetId) + '}', 201);
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'PUT': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid meal set ID"}', 400);
-Exit;
-end;
-MealSetId := ExtractResourceId(ARequest.PathInfo, 3);
-RequestData := GetJSON(ARequest.Content);
-if not (RequestData is TJSONObject) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid JSON format"}', 400);
-Exit;
-end;
-MealSetObj := RequestData as TJSONObject;
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text :=
-'UPDATE meal_sets SET name = :name, description = :description, ' +
-'available = :available, sort_order = :sort_order WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := MealSetId;
-Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
-Query.Params.ParamByName('description').AsString :=
-MealSetObj.Get('description', '');
-Query.Params.ParamByName('available').AsBoolean :=
-MealSetObj.Get('available', True);
-Query.Params.ParamByName('sort_order').AsInteger :=
-MealSetObj.Get('sort_order', 0);
-Query.ExecSQL;
-if Query.RowsAffected = 0 then
-begin
-SendJSONResponse(AResponse, '{"error":"Meal set not found"}', 404);
-Exit;
-end;
-if MealSetObj.Find('ingredients', IngredientsArray) then
-begin
-Query.SQL.Text := 'DELETE FROM meal_set_ingredients WHERE meal_set_id = :id';
-Query.Params.ParamByName('id').AsInteger := MealSetId;
-Query.ExecSQL;
-for i := 0 to IngredientsArray.Count - 1 do
-begin
-IngredientObj := IngredientsArray.Objects[i];
-Query.SQL.Text :=
-'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id, quantity) ' +
-'VALUES (:meal_set_id, :ingredient_id, :quantity)';
-Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-Query.Params.ParamByName('ingredient_id').AsInteger :=
-IngredientObj.Get('ingredient_id', 0);
-Query.Params.ParamByName('quantity').AsInteger :=
-IngredientObj.Get('quantity', 1);
-Query.ExecSQL;
-end;
-end;
-SendJSONResponse(AResponse, '{"success":true,"message":"Meal set updated"}');
-finally
-Query.Free;
-end;
-RequestData.Free;
-end;
-'DELETE': begin
-if not IsValidResourceId(ARequest.PathInfo, 3) then
-begin
-SendJSONResponse(AResponse, '{"error":"Invalid meal set ID"}', 400);
-Exit;
-end;
-MealSetId := ExtractResourceId(ARequest.PathInfo, 3);
-Query := TZQuery.Create(nil);
-try
-Query.Connection := FDB.FConnection;
-Query.SQL.Text := 'DELETE FROM meal_set_ingredients WHERE meal_set_id = :id';
-Query.Params.ParamByName('id').AsInteger := MealSetId;
-Query.ExecSQL;
-Query.SQL.Text := 'DELETE FROM meal_sets WHERE id = :id';
-Query.Params.ParamByName('id').AsInteger := MealSetId;
-Query.ExecSQL;
-if Query.RowsAffected > 0 then
-SendJSONResponse(AResponse, '{"success":true,"message":"Meal set deleted"}')
-else
-SendJSONResponse(AResponse, '{"error":"Meal set not found"}', 404);
-finally
-Query.Free;
-end;
-end;
-else
-SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
-end;
-except
-on E: Exception do
-begin
-WriteLn('Error in HandleAdminMealSets: ', E.Message);
-SendJSONResponse(AResponse, '{"error":"Database error: ' + E.Message + '"}', 500);
-end;
-end;
-end;
+end.

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - QR Bestellsystem</title>
+    <link rel="stylesheet" href="./css/admin-interface.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>QR-Bestellsystem Admin</h1>
+            <div class="server-status">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">Offline</span>
+            </div>
+        </header>
+
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <button class="nav-item active" data-page="dashboard">
+                📊 Dashboard
+            </button>
+            <button class="nav-item" data-page="orders">
+                📝 Bestellungen
+            </button>
+            <div class="nav-separator"></div>
+            <button class="nav-item" data-page="categories">
+                🎨 Kategorien
+            </button>
+            <button class="nav-item" data-page="ingredients">
+                🥘 Zutaten
+            </button>
+            <button class="nav-item" data-page="mealsets">
+                🍽️ Komplettgerichte
+            </button>
+            <div class="nav-separator"></div>
+            <button class="nav-item" data-page="inventory">
+                📦 Inventar
+            </button>
+            <button class="nav-item" data-page="statistics">
+                📈 Statistiken
+            </button>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="mainContent">
+            <!-- Content will be loaded here dynamically -->
+        </main>
+    </div>
+
+    <!-- Modal Container -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="close-modal" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+                <button class="btn btn-primary" id="modalSubmit">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- WICHTIG: Reihenfolge beachten! -->
+    <!-- 1. CRUD Manager müssen ZUERST geladen werden -->
+    <script src="./js/crud-managers.js"></script>
+    <!-- 2. Dann erst das Admin Interface -->
+    <script src="./js/admin-interface.js"></script>
+</body>
+</html>
