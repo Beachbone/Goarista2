@@ -143,6 +143,7 @@ class IngredientsManager extends BaseAPIClient {
             price: parseFloat(ingredientData.price),
             category_id: parseInt(ingredientData.category_id),
             available: ingredientData.available !== false,
+            radio_group_id: parseInt(ingredientData.radio_group_id) || 0,
             sort_order: parseInt(ingredientData.sort_order) || 0,
             stock_quantity: parseInt(ingredientData.stock_quantity) || 0,
             min_warning_level: parseInt(ingredientData.min_warning_level) || 5,
@@ -158,6 +159,7 @@ class IngredientsManager extends BaseAPIClient {
             price: parseFloat(ingredientData.price),
             category_id: parseInt(ingredientData.category_id),
             available: ingredientData.available,
+            radio_group_id: parseInt(ingredientData.radio_group_id) || 0,
             sort_order: parseInt(ingredientData.sort_order),
             stock_quantity: parseInt(ingredientData.stock_quantity),
             min_warning_level: parseInt(ingredientData.min_warning_level),
@@ -174,7 +176,7 @@ class IngredientsManager extends BaseAPIClient {
 }
 
 // ============================================
-// MealSets CRUD Manager - UPDATED MIT PREIS
+// MealSets CRUD Manager
 // ============================================
 class MealSetsManager extends BaseAPIClient {
     constructor() {
@@ -185,7 +187,7 @@ class MealSetsManager extends BaseAPIClient {
         const data = {
             name: mealSetData.name,
             description: mealSetData.description || '',
-            price: parseFloat(mealSetData.price) || 0,  // NEU!
+            price: parseFloat(mealSetData.price) || 0,
             available: mealSetData.available !== false,
             sort_order: parseInt(mealSetData.sort_order) || 0,
             ingredients: mealSetData.ingredients || []
@@ -197,7 +199,7 @@ class MealSetsManager extends BaseAPIClient {
         const data = {
             name: mealSetData.name,
             description: mealSetData.description,
-            price: parseFloat(mealSetData.price) || 0,  // NEU!
+            price: parseFloat(mealSetData.price) || 0,
             available: mealSetData.available,
             sort_order: parseInt(mealSetData.sort_order),
             ingredients: mealSetData.ingredients || []
@@ -205,7 +207,6 @@ class MealSetsManager extends BaseAPIClient {
         return await super.update(id, data);
     }
 
-    // Get meal set details with ingredients
     async getDetails(id) {
         const url = `${API_BASE_URL}/meal-sets/${id}`;
         try {
@@ -247,6 +248,56 @@ class OrdersManager extends BaseAPIClient {
             throw error;
         }
     }
+
+    async filterByStatus(status) {
+        try {
+            const allOrders = await this.getAll();
+            if (!status) return allOrders;
+            return allOrders.filter(order => order.status === status);
+        } catch (error) {
+            console.error(`Error filtering orders by status:`, error);
+            throw error;
+        }
+    }
+
+    async getTodayOrders() {
+        try {
+            const allOrders = await this.getAll();
+            const today = new Date().toISOString().split('T')[0];
+            return allOrders.filter(order => {
+                if (!order.created_at) return false;
+                const orderDate = order.created_at.split('T')[0];
+                return orderDate === today;
+            });
+        } catch (error) {
+            console.error(`Error getting today's orders:`, error);
+            throw error;
+        }
+    }
+
+    async getTodayRevenue() {
+        try {
+            const todayOrders = await this.getTodayOrders();
+            return todayOrders.reduce((sum, order) => {
+                return sum + (parseFloat(order.total_amount) || 0);
+            }, 0);
+        } catch (error) {
+            console.error(`Error calculating today revenue:`, error);
+            throw error;
+        }
+    }
+
+    async getTotalRevenue() {
+        try {
+            const allOrders = await this.getAll();
+            return allOrders.reduce((sum, order) => {
+                return sum + (parseFloat(order.total_amount) || 0);
+            }, 0);
+        } catch (error) {
+            console.error(`Error calculating total revenue:`, error);
+            throw error;
+        }
+    }
 }
 
 // ============================================
@@ -272,16 +323,34 @@ class InventoryManager {
 
     async updateStock(ingredientId, newStock) {
         try {
-            const response = await fetch(`${this.baseUrl}/${ingredientId}`, {
+            const allInventory = await this.getAll();
+            const ingredient = allInventory.find(item => item.id === ingredientId);
+            
+            if (!ingredient) {
+                throw new Error('Zutat nicht gefunden');
+            }
+
+            const updates = [{
+                id: ingredientId,
+                stock_quantity: parseInt(newStock),
+                min_warning_level: ingredient.min_warning_level || 5,
+                max_daily_limit: ingredient.max_daily_limit || 0,
+                track_inventory: ingredient.track_inventory || false
+            }];
+
+            const response = await fetch(`${this.baseUrl}/bulk`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ stock_quantity: newStock }),
+                body: JSON.stringify({ updates: updates }),
             });
+
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}`);
             }
+            
             return await response.json();
         } catch (error) {
             console.error('Error updating stock:', error);
@@ -291,11 +360,12 @@ class InventoryManager {
 
     async resetDaily() {
         try {
-            const response = await fetch(`${this.baseUrl}/reset-daily`, {
+            const response = await fetch(`${this.baseUrl}/reset`, {
                 method: 'POST',
             });
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}`);
             }
             return await response.json();
         } catch (error) {
@@ -307,18 +377,38 @@ class InventoryManager {
     async bulkUpdate(updates) {
         try {
             const response = await fetch(`${this.baseUrl}/bulk`, {
-                method: 'POST',
+                method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(updates),
+                body: JSON.stringify({ updates: updates }),
             });
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}`);
             }
             return await response.json();
         } catch (error) {
             console.error('Error bulk updating inventory:', error);
+            throw error;
+        }
+    }
+
+    async quickRefill(ingredientId, addAmount) {
+        try {
+            const allInventory = await this.getAll();
+            const ingredient = allInventory.find(item => item.id === ingredientId);
+            
+            if (!ingredient) {
+                throw new Error('Zutat nicht gefunden');
+            }
+
+            const currentStock = ingredient.stock_quantity || 0;
+            const newStock = currentStock + parseInt(addAmount);
+
+            return await this.updateStock(ingredientId, newStock);
+        } catch (error) {
+            console.error('Error quick refilling stock:', error);
             throw error;
         }
     }
@@ -386,6 +476,72 @@ class StatsManager {
 }
 
 // ============================================
+// Events Manager
+// ============================================
+class EventsManager extends BaseAPIClient {
+    constructor() {
+        super('/admin/events');
+    }
+
+    async getActive() {
+        try {
+            const response = await fetch(`${this.baseUrl}/active`);
+            if (!response.ok) {
+                if (response.status === 404) return null;
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching active event:', error);
+            return null;
+        }
+    }
+
+    async activate(eventId) {
+        try {
+            const response = await fetch(`${this.baseUrl}/${eventId}/activate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error activating event:', error);
+            throw error;
+        }
+    }
+
+    async deactivate() {
+        try {
+            const response = await fetch(`${this.baseUrl}/deactivate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error deactivating event:', error);
+            throw error;
+        }
+    }
+}
+
+// ============================================
+// Radio Groups Manager
+// ============================================
+class RadioGroupsManager extends BaseAPIClient {
+    constructor() {
+        super('/admin/radio-groups');
+    }
+}
+
+// ============================================
 // Export CRUD Object
 // ============================================
 const CRUD = {
@@ -394,10 +550,11 @@ const CRUD = {
     mealSets: new MealSetsManager(),
     inventory: new InventoryManager(),
     orders: new OrdersManager(),
-    stats: new StatsManager()
+    stats: new StatsManager(),
+    events: new EventsManager(),
+    radioGroups: new RadioGroupsManager()
 };
 
-// Make available globally
 if (typeof window !== 'undefined') {
     window.CRUD = CRUD;
     window.API_BASE_URL = API_BASE_URL;

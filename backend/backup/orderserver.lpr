@@ -33,6 +33,7 @@ type
     procedure InitializeDatabase;
     procedure CreateTables;
     procedure MigrateMealSetsPriceField;
+    procedure MigrateRadioGroup;
   public
     constructor Create;
     destructor Destroy; override;
@@ -50,7 +51,6 @@ type
     function ExtractResourceId(const PathInfo: string;
       ResourcePosition: integer = 3): integer;
     function GetPathSegment(const PathInfo: string; SegmentIndex: integer): string;
-    procedure HandleAdminRadioGroups(ARequest: TRequest; AResponse: TResponse);
     function IsValidResourceId(const PathInfo: string;
       ResourcePosition: integer = 3): boolean;
 
@@ -72,6 +72,8 @@ type
     procedure HandleMealSets(ARequest: TRequest; AResponse: TResponse);
     procedure HandleStats(ARequest: TRequest; AResponse: TResponse);
     procedure HandleUpdateOrderStatus(ARequest: TRequest; AResponse: TResponse);
+    procedure HandleAdminEvents(ARequest: TRequest; AResponse: TResponse);
+    procedure HandleAdminRadioGroups(ARequest: TRequest; AResponse: TResponse);
   public
     constructor Create;
     destructor Destroy; override;
@@ -218,6 +220,57 @@ type
     end;
   end;
 
+  procedure TDatabaseManager.MigrateRadioGroup;
+  var
+    Query: TZQuery;
+  begin
+    // NEU: Füge radio_group_id zu ingredients hinzu (Migration)
+    Query := TZQuery.Create(nil);
+    try
+      Query.Connection := FConnection;
+
+      // Prüfen ob Spalte existiert
+      Query.SQL.Text := 'PRAGMA table_info(ingredients)';
+      Query.Open;
+
+      while not Query.EOF do
+      begin
+        if Query.FieldByName('name').AsString = 'radio_group_id' then
+        begin
+          WriteLn('radio_group_id field already exists in ingredients table');
+          Query.Close;
+          Exit;
+        end;
+        Query.Next;
+      end;
+      Query.Close;
+
+      // Spalte hinzufügen
+      WriteLn('Adding radio_group_id field to ingredients table...');
+      Query.SQL.Text := 'ALTER TABLE ingredients ADD COLUMN radio_group_id INTEGER NULL';
+      Query.ExecSQL;
+
+      // Foreign Key nachträglich nicht möglich in SQLite, aber wir setzen die Werte
+      WriteLn('Setting radio_group_id for existing ingredients...');
+      Query.SQL.Text :=
+        'UPDATE ingredients SET radio_group_id = 1 WHERE name LIKE ''%Leberwurst%''';
+      Query.ExecSQL;
+      Query.SQL.Text :=
+        'UPDATE ingredients SET radio_group_id = 2 WHERE name LIKE ''%Blutwurst%''';
+      Query.ExecSQL;
+      Query.SQL.Text :=
+        'UPDATE ingredients SET radio_group_id = 3 WHERE name LIKE ''%Schwartenmagen%''';
+      Query.ExecSQL;
+      Query.SQL.Text :=
+        'UPDATE ingredients SET radio_group_id = 4 WHERE name LIKE ''%Wellfleisch%''';
+      Query.ExecSQL;
+
+      WriteLn('radio_group_id field added successfully');
+    finally
+      Query.Free;
+    end;
+  end;
+
   procedure TDatabaseManager.CreateTables;
   begin
     // Tables configuration
@@ -239,6 +292,34 @@ type
       '  sort_order INTEGER DEFAULT 0' + ')'
       );
 
+    // Events - NEU
+    ExecuteSQL(
+      'CREATE TABLE IF NOT EXISTS events (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
+      '  description TEXT,' + '  event_date DATE,' +
+      '  is_active BOOLEAN DEFAULT 0,' +
+      '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' + ')'
+      );
+
+    // Event Meal Sets Mapping - NEU
+    ExecuteSQL(
+      'CREATE TABLE IF NOT EXISTS event_meal_sets (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  event_id INTEGER NOT NULL,' +
+      '  meal_set_id INTEGER NOT NULL,' + '  available BOOLEAN DEFAULT 1,' +
+      '  custom_price DECIMAL(10,2) NULL,' +
+      '  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,' +
+      '  UNIQUE(event_id, meal_set_id)' + ')'
+      );
+
+    // Event Ingredients Mapping - NEU
+    ExecuteSQL(
+      'CREATE TABLE IF NOT EXISTS event_ingredients (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  event_id INTEGER NOT NULL,' +
+      '  ingredient_id INTEGER NOT NULL,' + '  available BOOLEAN DEFAULT 1,' +
+      '  custom_price DECIMAL(10,2) NULL,' +
+      '  FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,' +
+      '  UNIQUE(event_id, ingredient_id)' + ')'
+      );
 
     // Meal sets - MIT PREIS
     ExecuteSQL(
@@ -320,6 +401,13 @@ type
       '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
       '  exclusive BOOLEAN DEFAULT 1,' + '  sort_order INTEGER DEFAULT 0,' +
       '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' + ')');
+    // Radio Groups table (existiert schon)
+    ExecuteSQL(
+      'CREATE TABLE IF NOT EXISTS radio_groups (' +
+      '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + '  name TEXT NOT NULL,' +
+      '  exclusive BOOLEAN DEFAULT 1,' + '  sort_order INTEGER DEFAULT 0,' +
+      '  created_at DATETIME DEFAULT CURRENT_TIMESTAMP' + ')');
+
 
     // Sample radio groups data
     ExecuteSQL('INSERT OR IGNORE INTO radio_groups (id, name, exclusive, sort_order) VALUES (1, ''Leberwurst'', 1, 1)');
@@ -426,6 +514,7 @@ type
     WriteLn('Initializing database schema...');
     CreateTables;
     MigrateMealSetsPriceField;  // NEU! Migration für bestehende DBs
+    MigrateRadioGroup;
     WriteLn('Database initialization complete');
   end;
 
@@ -975,8 +1064,10 @@ type
         'GET':
         begin
           Ingredients := FDB.QueryJSON(
-            'SELECT i.*, c.name as category_name FROM ingredients i ' +
+            'SELECT i.*, c.name as category_name, rg.name as radio_group_name ' +
+            'FROM ingredients i ' +
             'LEFT JOIN categories c ON i.category_id = c.id ' +
+            'LEFT JOIN radio_groups rg ON i.radio_group_id = rg.id ' +  // NEU
             'ORDER BY i.category_id, i.sort_order, i.name');
           SendJSONResponse(AResponse, Ingredients.AsJSON);
           Ingredients.Free;
@@ -997,9 +1088,11 @@ type
             Query.Connection := FDB.FConnection;
             Query.SQL.Text :=
               'INSERT INTO ingredients (name, price, category_id, available, sort_order, '
-              + 'stock_quantity, min_warning_level, max_daily_limit, track_inventory) '
-              + 'VALUES (:name, :price, :category_id, :available, :sort_order, ' +
-              ':stock_quantity, :min_warning_level, :max_daily_limit, :track_inventory)';
+              + 'stock_quantity, min_warning_level, max_daily_limit, track_inventory, radio_group_id) '
+              +  // NEU
+              'VALUES (:name, :price, :category_id, :available, :sort_order, ' +
+              ':stock_quantity, :min_warning_level, :max_daily_limit, :track_inventory, :radio_group_id)';
+            // NEU
             Query.Params.ParamByName('name').AsString := IngredientObj.Get('name', '');
             Query.Params.ParamByName('price').AsFloat := IngredientObj.Get('price', 0.0);
             Query.Params.ParamByName('category_id').AsInteger :=
@@ -1016,6 +1109,14 @@ type
               IngredientObj.Get('max_daily_limit', 0);
             Query.Params.ParamByName('track_inventory').AsBoolean :=
               IngredientObj.Get('track_inventory', False);
+
+            // NEU: Radio Group ID
+            if IngredientObj.Get('radio_group_id', 0) > 0 then
+              Query.Params.ParamByName('radio_group_id').AsInteger :=
+                IngredientObj.Get('radio_group_id', 0)
+            else
+              Query.Params.ParamByName('radio_group_id').Clear;  // NULL setzen
+
             Query.ExecSQL;
             SendJSONResponse(AResponse,
               '{"success":true,"message":"Ingredient created"}', 201);
@@ -1049,7 +1150,9 @@ type
               'UPDATE ingredients SET name = :name, price = :price, category_id = :category_id, '
               + 'available = :available, sort_order = :sort_order, stock_quantity = :stock_quantity, '
               + 'min_warning_level = :min_warning_level, max_daily_limit = :max_daily_limit, '
-              + 'track_inventory = :track_inventory WHERE id = :id';
+              + 'track_inventory = :track_inventory, radio_group_id = :radio_group_id '
+              +  // NEU
+              'WHERE id = :id';
             Query.Params.ParamByName('id').AsInteger := IngredientId;
             Query.Params.ParamByName('name').AsString := IngredientObj.Get('name', '');
             Query.Params.ParamByName('price').AsFloat := IngredientObj.Get('price', 0.0);
@@ -1067,6 +1170,11 @@ type
               IngredientObj.Get('max_daily_limit', 0);
             Query.Params.ParamByName('track_inventory').AsBoolean :=
               IngredientObj.Get('track_inventory', False);
+            if IngredientObj.Get('radio_group_id', 0) > 0 then
+              Query.Params.ParamByName('radio_group_id').AsInteger :=
+                IngredientObj.Get('radio_group_id', 0)
+            else
+              Query.Params.ParamByName('radio_group_id').Clear;
             Query.ExecSQL;
 
             if Query.RowsAffected > 0 then
@@ -1138,7 +1246,6 @@ type
     RequestData: TJSONData;
     MealSetObj: TJSONObject;
     IngredientsArray: TJSONArray;
-    IngredientObj: TJSONObject;
     MealSetId: integer;
     Query: TZQuery;
     MealSets: TJSONArray;
@@ -1178,7 +1285,7 @@ type
               'GROUP BY ms.id ' + 'ORDER BY ms.sort_order, ms.name';
             Query.Open;
 
-            MealSets := QueryToJSONArray(Query);
+            MealSets := FDB.QueryJSON(Query.SQL.Text);
             SendJSONResponse(AResponse, MealSets.AsJSON);
             MealSets.Free;
           finally
@@ -1202,8 +1309,7 @@ type
             // Insert meal set
             Query.SQL.Text :=
               'INSERT INTO meal_sets (name, description, price, available, sort_order) '
-              +
-              'VALUES (:name, :description, :price, :available, :sort_order)';
+              + 'VALUES (:name, :description, :price, :available, :sort_order)';
             Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
             Query.Params.ParamByName('description').AsString :=
               MealSetObj.Get('description', '');
@@ -1215,7 +1321,10 @@ type
               MealSetObj.Get('sort_order', 0);
             Query.ExecSQL;
 
-            MealSetId := FDB.FConnection.GetInsertID;
+            Query.SQL.Text := 'SELECT last_insert_rowid() as id';
+            Query.Open;
+            MealSetId := Query.Fields[0].AsInteger;
+            Query.Close;
 
             // Insert ingredients
             if MealSetObj.Find('ingredients') <> nil then
@@ -1223,12 +1332,13 @@ type
               IngredientsArray := MealSetObj.Get('ingredients', TJSONArray.Create);
               for i := 0 to IngredientsArray.Count - 1 do
               begin
-                IngredientId := IngredientsArray.Integers[i];
+                //IngredientId := IngredientsArray.Integers[i];
                 Query.SQL.Text :=
                   'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id) ' +
                   'VALUES (:meal_set_id, :ingredient_id)';
                 Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-                Query.Params.ParamByName('ingredient_id').AsInteger := IngredientId;
+                Query.Params.ParamByName('ingredient_id').AsInteger :=
+                  IngredientsArray.Integers[i];
                 Query.ExecSQL;
               end;
             end;
@@ -1271,9 +1381,12 @@ type
             Query.Params.ParamByName('name').AsString := MealSetObj.Get('name', '');
             Query.Params.ParamByName('description').AsString :=
               MealSetObj.Get('description', '');
-            Query.Params.ParamByName('price').AsFloat := MealSetObj.Get('price', 0.0);  // NEU!
-            Query.Params.ParamByName('available').AsBoolean := MealSetObj.Get('available', True);
-            Query.Params.ParamByName('sort_order').AsInteger := MealSetObj.Get('sort_order', 0);
+            Query.Params.ParamByName('price').AsFloat :=
+              MealSetObj.Get('price', 0.0);  // NEU!
+            Query.Params.ParamByName('available').AsBoolean :=
+              MealSetObj.Get('available', True);
+            Query.Params.ParamByName('sort_order').AsInteger :=
+              MealSetObj.Get('sort_order', 0);
             Query.ExecSQL;
 
             // Delete existing ingredient mappings
@@ -1287,18 +1400,20 @@ type
               IngredientsArray := MealSetObj.Get('ingredients', TJSONArray.Create);
               for i := 0 to IngredientsArray.Count - 1 do
               begin
-                IngredientId := IngredientsArray.Integers[i];
+                //IngredientId := IngredientsArray.Integers[i];
                 Query.SQL.Text :=
                   'INSERT INTO meal_set_ingredients (meal_set_id, ingredient_id) ' +
                   'VALUES (:meal_set_id, :ingredient_id)';
                 Query.Params.ParamByName('meal_set_id').AsInteger := MealSetId;
-                Query.Params.ParamByName('ingredient_id').AsInteger := IngredientId;
+                Query.Params.ParamByName('ingredient_id').AsInteger :=
+                  IngredientsArray.Integers[i];
                 Query.ExecSQL;
               end;
             end;
 
             if Query.RowsAffected > 0 then
-              SendJSONResponse(AResponse, '{"success":true,"message":"Meal set updated"}')
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"Meal set updated"}')
             else
               SendJSONResponse(AResponse, '{"error":"Meal set not found"}', 404);
           finally
@@ -1545,6 +1660,438 @@ type
       on E: Exception do
       begin
         WriteLn('Error in HandleAdminInventory: ', E.Message);
+        SendJSONResponse(AResponse, '{"error":"Database error: ' +
+          E.Message + '"}', 500);
+      end;
+    end;
+  end;
+
+  procedure TOrderAPIHandler.HandleAdminEvents(ARequest: TRequest; AResponse: TResponse);
+  var
+    RequestData: TJSONData;
+    EventObj: TJSONObject;
+    EventId: integer;
+    Query: TZQuery;
+    Events: TJSONArray;
+    PathParts: TStringArray;
+    SubPath: string;
+    MealSetsArray, IngredientsArray: TJSONArray;
+    i: integer;
+  begin
+    WriteLn('Admin Events request: ', ARequest.Method, ' ', ARequest.PathInfo);
+
+    // OPTIONS für CORS Preflight
+    if ARequest.Method = 'OPTIONS' then
+    begin
+      SetCORSHeaders(AResponse);
+      AResponse.Code := 200;
+      AResponse.Content := '';
+      Exit;
+    end;
+
+    if not ValidateAdminAccess(ARequest) then
+    begin
+      SendJSONResponse(AResponse, '{"error":"Unauthorized"}', 401);
+      Exit;
+    end;
+
+    try
+      PathParts := SplitString(ARequest.PathInfo, '/');
+      // /api/admin/events => PathParts[4] wäre leer
+      // /api/admin/events/5 => PathParts[4] = '5'
+      // /api/admin/events/active => PathParts[4] = 'active'
+
+      if Length(PathParts) >= 5 then
+        SubPath := PathParts[4]
+      else
+        SubPath := '';
+
+      case ARequest.Method of
+        'GET':
+        begin
+          // GET /api/admin/events/active - Aktives Event holen
+          if SubPath = 'active' then
+          begin
+            Query := TZQuery.Create(nil);
+            try
+              Query.Connection := FDB.FConnection;
+              Query.SQL.Text :=
+                'SELECT e.*, ' +
+                '  (SELECT COUNT(*) FROM event_meal_sets WHERE event_id = e.id) as meal_set_count, '
+                + '  (SELECT COUNT(*) FROM event_ingredients WHERE event_id = e.id) as ingredient_count '
+                + 'FROM events e WHERE e.is_active = 1 LIMIT 1';
+              Query.Open;
+
+              if not Query.EOF then
+              begin
+                Events := FDB.QueryJSON(Query.SQL.Text);
+                SendJSONResponse(AResponse, Events.AsJSON);
+                Events.Free;
+              end
+              else
+                SendJSONResponse(AResponse, 'null');
+            finally
+              Query.Free;
+            end;
+            Exit;
+          end;
+
+          // GET /api/admin/events/:id - Einzelnes Event mit Details
+          if (SubPath <> '') and TryStrToInt(SubPath, EventId) then
+          begin
+            Query := TZQuery.Create(nil);
+            try
+              Query.Connection := FDB.FConnection;
+
+              // Event Basisdaten
+              Query.SQL.Text :=
+                'SELECT e.*, ' +
+                '  (SELECT COUNT(*) FROM event_meal_sets WHERE event_id = e.id) as meal_set_count, '
+                + '  (SELECT COUNT(*) FROM event_ingredients WHERE event_id = e.id) as ingredient_count '
+                + 'FROM events e WHERE e.id = :id';
+              Query.Params.ParamByName('id').AsInteger := EventId;
+              Query.Open;
+
+              if Query.EOF then
+              begin
+                SendJSONResponse(AResponse, '{"error":"Event not found"}', 404);
+                Exit;
+              end;
+
+              EventObj := TJSONObject.Create;
+              try
+                // Basisdaten
+                EventObj.Add('id', Query.FieldByName('id').AsInteger);
+                EventObj.Add('name', Query.FieldByName('name').AsString);
+                EventObj.Add('description', Query.FieldByName('description').AsString);
+                EventObj.Add('event_date', Query.FieldByName('event_date').AsString);
+                EventObj.Add('is_active', Query.FieldByName('is_active').AsBoolean);
+                EventObj.Add('created_at', Query.FieldByName('created_at').AsString);
+                EventObj.Add('meal_set_count',
+                  Query.FieldByName('meal_set_count').AsInteger);
+                EventObj.Add('ingredient_count',
+                  Query.FieldByName('ingredient_count').AsInteger);
+
+                Query.Close;
+
+                // Meal Sets für dieses Event
+                Query.SQL.Text :=
+                  'SELECT meal_set_id FROM event_meal_sets WHERE event_id = :id';
+                Query.Params.ParamByName('id').AsInteger := EventId;
+                Query.Open;
+
+                MealSetsArray := TJSONArray.Create;
+                while not Query.EOF do
+                begin
+                  MealSetsArray.Add(Query.FieldByName('meal_set_id').AsInteger);
+                  Query.Next;
+                end;
+                EventObj.Add('meal_sets', MealSetsArray);
+                Query.Close;
+
+                // Ingredients für dieses Event
+                Query.SQL.Text :=
+                  'SELECT ingredient_id FROM event_ingredients WHERE event_id = :id';
+                Query.Params.ParamByName('id').AsInteger := EventId;
+                Query.Open;
+
+                IngredientsArray := TJSONArray.Create;
+                while not Query.EOF do
+                begin
+                  IngredientsArray.Add(Query.FieldByName('ingredient_id').AsInteger);
+                  Query.Next;
+                end;
+                EventObj.Add('ingredients', IngredientsArray);
+
+                SendJSONResponse(AResponse, EventObj.AsJSON);
+              finally
+                EventObj.Free;
+              end;
+            finally
+              Query.Free;
+            end;
+            Exit;
+          end;
+
+          // GET /api/admin/events - Alle Events
+          Events := FDB.QueryJSON('SELECT e.*, ' +
+            '  (SELECT COUNT(*) FROM event_meal_sets WHERE event_id = e.id) as meal_set_count, '
+            + '  (SELECT COUNT(*) FROM event_ingredients WHERE event_id = e.id) as ingredient_count '
+            + 'FROM events e ORDER BY e.is_active DESC, e.created_at DESC');
+          SendJSONResponse(AResponse, Events.AsJSON);
+          Events.Free;
+        end;
+
+        'POST':
+        begin
+          // POST /api/admin/events/:id/activate - Event aktivieren
+          if (SubPath <> '') and (Length(PathParts) >= 6) and
+            (PathParts[5] = 'activate') then
+          begin
+            if not TryStrToInt(SubPath, EventId) then
+            begin
+              SendJSONResponse(AResponse, '{"error":"Invalid event ID"}', 400);
+              Exit;
+            end;
+
+            Query := TZQuery.Create(nil);
+            try
+              Query.Connection := FDB.FConnection;
+
+              // Alle Events deaktivieren
+              Query.SQL.Text := 'UPDATE events SET is_active = 0';
+              Query.ExecSQL;
+
+              // Gewähltes Event aktivieren
+              Query.SQL.Text := 'UPDATE events SET is_active = 1 WHERE id = :id';
+              Query.Params.ParamByName('id').AsInteger := EventId;
+              Query.ExecSQL;
+
+              if Query.RowsAffected > 0 then
+                SendJSONResponse(AResponse,
+                  '{"success":true,"message":"Event activated"}')
+              else
+                SendJSONResponse(AResponse, '{"error":"Event not found"}', 404);
+            finally
+              Query.Free;
+            end;
+            Exit;
+          end;
+
+          // POST /api/admin/events/deactivate - Alle Events deaktivieren
+          if SubPath = 'deactivate' then
+          begin
+            Query := TZQuery.Create(nil);
+            try
+              Query.Connection := FDB.FConnection;
+              Query.SQL.Text := 'UPDATE events SET is_active = 0';
+              Query.ExecSQL;
+              SendJSONResponse(AResponse,
+                '{"success":true,"message":"All events deactivated"}');
+            finally
+              Query.Free;
+            end;
+            Exit;
+          end;
+
+          // POST /api/admin/events - Neues Event erstellen
+          if ARequest.Content = '' then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
+            Exit;
+          end;
+
+          try
+            RequestData := GetJSON(ARequest.Content);
+          except
+            on E: Exception do
+            begin
+              SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' +
+                E.Message + '"}', 400);
+              Exit;
+            end;
+          end;
+
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
+            RequestData.Free;
+            Exit;
+          end;
+
+          EventObj := RequestData as TJSONObject;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+
+            // Event erstellen
+            Query.SQL.Text :=
+              'INSERT INTO events (name, description, event_date) ' +
+              'VALUES (:name, :description, :event_date)';
+            Query.Params.ParamByName('name').AsString := EventObj.Get('name', '');
+            Query.Params.ParamByName('description').AsString :=
+              EventObj.Get('description', '');
+            Query.Params.ParamByName('event_date').AsString :=
+              EventObj.Get('event_date', '');
+            Query.ExecSQL;
+
+            Query.SQL.Text := 'SELECT last_insert_rowid() as id';
+            Query.Open;
+            EventId := Query.Fields[0].AsInteger;
+            Query.Close;
+
+            // Meal Sets zuordnen
+            if EventObj.Find('meal_sets') <> nil then
+            begin
+              MealSetsArray := EventObj.Get('meal_sets', TJSONArray.Create);
+              for i := 0 to MealSetsArray.Count - 1 do
+              begin
+                Query.SQL.Text :=
+                  'INSERT INTO event_meal_sets (event_id, meal_set_id) ' +
+                  'VALUES (:event_id, :meal_set_id)';
+                Query.Params.ParamByName('event_id').AsInteger := EventId;
+                Query.Params.ParamByName('meal_set_id').AsInteger :=
+                  MealSetsArray.Integers[i];
+                Query.ExecSQL;
+              end;
+            end;
+
+            // Ingredients zuordnen
+            if EventObj.Find('ingredients') <> nil then
+            begin
+              IngredientsArray := EventObj.Get('ingredients', TJSONArray.Create);
+              for i := 0 to IngredientsArray.Count - 1 do
+              begin
+                Query.SQL.Text :=
+                  'INSERT INTO event_ingredients (event_id, ingredient_id) ' +
+                  'VALUES (:event_id, :ingredient_id)';
+                Query.Params.ParamByName('event_id').AsInteger := EventId;
+                Query.Params.ParamByName('ingredient_id').AsInteger :=
+                  IngredientsArray.Integers[i];
+                Query.ExecSQL;
+              end;
+            end;
+
+            SendJSONResponse(AResponse, Format('{"success":true,"id":%d}',
+              [EventId]), 201);
+          finally
+            Query.Free;
+          end;
+          RequestData.Free;
+        end;
+
+        'PUT':
+        begin
+          // PUT /api/admin/events/:id - Event aktualisieren
+          if not TryStrToInt(SubPath, EventId) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid event ID"}', 400);
+            Exit;
+          end;
+
+          if ARequest.Content = '' then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Empty request body"}', 400);
+            Exit;
+          end;
+
+          try
+            RequestData := GetJSON(ARequest.Content);
+          except
+            on E: Exception do
+            begin
+              SendJSONResponse(AResponse, '{"error":"Invalid JSON: ' +
+                E.Message + '"}', 400);
+              Exit;
+            end;
+          end;
+
+          if not (RequestData is TJSONObject) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"JSON must be an object"}', 400);
+            RequestData.Free;
+            Exit;
+          end;
+
+          EventObj := RequestData as TJSONObject;
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+
+            // Event aktualisieren
+            Query.SQL.Text :=
+              'UPDATE events SET name = :name, description = :description, ' +
+              'event_date = :event_date WHERE id = :id';
+            Query.Params.ParamByName('id').AsInteger := EventId;
+            Query.Params.ParamByName('name').AsString := EventObj.Get('name', '');
+            Query.Params.ParamByName('description').AsString :=
+              EventObj.Get('description', '');
+            Query.Params.ParamByName('event_date').AsString :=
+              EventObj.Get('event_date', '');
+            Query.ExecSQL;
+
+            // Alte Zuordnungen löschen
+            Query.SQL.Text := 'DELETE FROM event_meal_sets WHERE event_id = :id';
+            Query.Params.ParamByName('id').AsInteger := EventId;
+            Query.ExecSQL;
+
+            Query.SQL.Text := 'DELETE FROM event_ingredients WHERE event_id = :id';
+            Query.Params.ParamByName('id').AsInteger := EventId;
+            Query.ExecSQL;
+
+            // Neue Meal Sets zuordnen
+            if EventObj.Find('meal_sets') <> nil then
+            begin
+              MealSetsArray := EventObj.Get('meal_sets', TJSONArray.Create);
+              for i := 0 to MealSetsArray.Count - 1 do
+              begin
+                Query.SQL.Text :=
+                  'INSERT INTO event_meal_sets (event_id, meal_set_id) ' +
+                  'VALUES (:event_id, :meal_set_id)';
+                Query.Params.ParamByName('event_id').AsInteger := EventId;
+                Query.Params.ParamByName('meal_set_id').AsInteger :=
+                  MealSetsArray.Integers[i];
+                Query.ExecSQL;
+              end;
+            end;
+
+            // Neue Ingredients zuordnen
+            if EventObj.Find('ingredients') <> nil then
+            begin
+              IngredientsArray := EventObj.Get('ingredients', TJSONArray.Create);
+              for i := 0 to IngredientsArray.Count - 1 do
+              begin
+                Query.SQL.Text :=
+                  'INSERT INTO event_ingredients (event_id, ingredient_id) ' +
+                  'VALUES (:event_id, :ingredient_id)';
+                Query.Params.ParamByName('event_id').AsInteger := EventId;
+                Query.Params.ParamByName('ingredient_id').AsInteger :=
+                  IngredientsArray.Integers[i];
+                Query.ExecSQL;
+              end;
+            end;
+
+            SendJSONResponse(AResponse, '{"success":true,"message":"Event updated"}');
+          finally
+            Query.Free;
+          end;
+          RequestData.Free;
+        end;
+
+        'DELETE':
+        begin
+          // DELETE /api/admin/events/:id
+          if not TryStrToInt(SubPath, EventId) then
+          begin
+            SendJSONResponse(AResponse, '{"error":"Invalid event ID"}', 400);
+            Exit;
+          end;
+
+          Query := TZQuery.Create(nil);
+          try
+            Query.Connection := FDB.FConnection;
+
+            // Zuordnungen werden automatisch durch CASCADE gelöscht
+            Query.SQL.Text := 'DELETE FROM events WHERE id = :id';
+            Query.Params.ParamByName('id').AsInteger := EventId;
+            Query.ExecSQL;
+
+            if Query.RowsAffected > 0 then
+              SendJSONResponse(AResponse, '{"success":true,"message":"Event deleted"}')
+            else
+              SendJSONResponse(AResponse, '{"error":"Event not found"}', 404);
+          finally
+            Query.Free;
+          end;
+        end;
+
+        else
+          SendJSONResponse(AResponse, '{"error":"Method not allowed"}', 405);
+      end;
+    except
+      on E: Exception do
+      begin
+        WriteLn('Error in HandleAdminEvents: ', E.Message);
         SendJSONResponse(AResponse, '{"error":"Database error: ' +
           E.Message + '"}', 500);
       end;
@@ -1805,7 +2352,6 @@ type
   begin
     WriteLn('MealSet Details request: ', ARequest.PathInfo);
 
-    // OPTIONS für CORS Preflight - HINZUFÜGEN!
     if ARequest.Method = 'OPTIONS' then
     begin
       SetCORSHeaders(AResponse);
@@ -1813,7 +2359,6 @@ type
       AResponse.Content := '';
       Exit;
     end;
-
 
     try
       if ARequest.Method <> 'GET' then
@@ -1829,6 +2374,7 @@ type
         Exit;
       end;
 
+
       Details := FDB.QueryJSON(
         'SELECT ms.id as meal_set_id, ms.name as meal_set_name, ms.description, ' +
         'msi.quantity, i.id as ingredient_id, i.name as ingredient_name, ' +
@@ -1838,8 +2384,7 @@ type
         'JOIN meal_set_ingredients msi ON ms.id = msi.meal_set_id ' +
         'JOIN ingredients i ON msi.ingredient_id = i.id ' +
         'LEFT JOIN categories c ON i.category_id = c.id ' + 'WHERE ms.id = ' +
-        IntToStr(MealSetId) + ' AND ms.available = 1 AND i.available = 1 ' +
-        'ORDER BY c.sort_order, i.sort_order, i.name');
+        IntToStr(MealSetId) + ' ' + 'ORDER BY c.sort_order, i.sort_order, i.name');
 
       SendJSONResponse(AResponse, Details.AsJSON);
       Details.Free;
@@ -2299,6 +2844,8 @@ begin
     HTTPRouter.RegisterRoute('/api/admin/meal-sets/*', @APIHandler.HandleAdminMealSets);
     HTTPRouter.RegisterRoute('/api/admin/inventory', @APIHandler.HandleAdminInventory);
     HTTPRouter.RegisterRoute('/api/admin/inventory/*', @APIHandler.HandleAdminInventory);
+    HTTPRouter.RegisterRoute('/api/admin/events', @APIHandler.HandleAdminEvents);
+    HTTPRouter.RegisterRoute('/api/admin/events/*', @APIHandler.HandleAdminEvents);
 
     HTTPRouter.RegisterRoute('*', @APIHandler.HandleDefault);
 
@@ -2317,6 +2864,12 @@ begin
     WriteLn('  http://localhost:8080/api/admin/ingredients         [GET, POST, PUT, DELETE]');
     WriteLn('  http://localhost:8080/api/admin/meal-sets           [GET, POST, PUT, DELETE]');
     WriteLn('  http://localhost:8080/api/admin/inventory           [GET, PUT]');
+    WriteLn('  http://localhost:8080/api/dishes                    [GET]');
+    WriteLn('  http://localhost:8080/api/ingredients/category/{id} [GET]');
+    WriteLn('  http://localhost:8080/api/meal-sets/{id}/details    [GET]');
+    WriteLn('  http://localhost:8080/api/admin/events              [GET, POST, PUT, DELETE]');
+    WriteLn('  http://localhost:8080/api/admin/events/active       [GET]');
+    WriteLn('  http://localhost:8080/api/admin/radio-groups        [GET, POST, PUT, DELETE]');
     WriteLn('');
     WriteLn('Press Ctrl+C to stop server');
 

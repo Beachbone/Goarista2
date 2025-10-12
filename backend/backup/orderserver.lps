@@ -10,9 +10,10 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="OrderServer"/>
         <IsVisibleTab Value="True"/>
-        <TopLine Value="1269"/>
-        <CursorPos Y="1309"/>
-        <UsageCount Value="180"/>
+        <TopLine Value="189"/>
+        <CursorPos X="19" Y="517"/>
+        <FoldState Value=" T3nF2}=0B1 plRtR2}p01]Cm7w52}X]Ar0vX2I2 pj7jV2Z212]gInV2{h1]LMmL2H1 PSJ2q"/>
+        <UsageCount Value="221"/>
         <Loaded Value="True"/>
       </Unit>
       <Unit>
@@ -20,76 +21,12 @@
         <EditorIndex Value="1"/>
         <TopLine Value="720"/>
         <CursorPos Y="740"/>
-        <UsageCount Value="42"/>
+        <UsageCount Value="62"/>
         <Loaded Value="True"/>
         <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit>
     </Units>
     <JumpHistory HistoryIndex="29">
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2502" Column="107" TopLine="2482"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2147" Column="109"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2152" Column="26" TopLine="2118"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1516" Column="38" TopLine="1495"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2098" Column="36" TopLine="2064"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2152" Column="19" TopLine="2118"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1516" Column="29" TopLine="1495"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="2098" Column="27" TopLine="2064"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="69" Column="25" TopLine="37"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1785" Column="43" TopLine="1755"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1925" Column="95" TopLine="1892"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1970" Column="29" TopLine="1937"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1988" Column="53" TopLine="1969"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1994" Column="14" TopLine="2062"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1996" Column="11" TopLine="1975"/>
-      </Position>
-      <Position>
-        <Filename Value="orderserver.lpr"/>
-        <Caret Line="1998" Column="33" TopLine="1975"/>
-      </Position>
       <Position>
         <Filename Value="orderserver.lpr"/>
         <Caret Line="2007" Column="13" TopLine="1975"/>
@@ -145,6 +82,70 @@
       <Position>
         <Filename Value="orderserver.lpr"/>
         <Caret Line="66" Column="26" TopLine="54"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1309" TopLine="1269"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1181" Column="55" TopLine="1161"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1231" Column="72" TopLine="1211"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1221" Column="25" TopLine="1198"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1229" Column="19" TopLine="1212"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1234" Column="101" TopLine="1214"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1298" Column="101" TopLine="1273"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="253" Column="80" TopLine="238"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="61" Column="27" TopLine="40"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1594" Column="46" TopLine="541"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="2002" Column="42" TopLine="1969"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="53" Column="32" TopLine="31"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1594" Column="34" TopLine="548"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="70" Column="30" TopLine="60"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="1153" Column="70" TopLine="1121"/>
+      </Position>
+      <Position>
+        <Filename Value="orderserver.lpr"/>
+        <Caret Line="271" Column="5" TopLine="242"/>
       </Position>
     </JumpHistory>
     <RunParams>

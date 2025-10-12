@@ -35,10 +35,14 @@
             <button class="nav-item" data-page="mealsets">
                 🍽️ Komplettgerichte
             </button>
-            <div class="nav-separator"></div>
-            <button class="nav-item" data-page="inventory">
-                📦 Inventar
+            <button class="nav-item" data-page="radiogroups">
+                🔘 Radio Groups
             </button>
+            			<div class="nav-separator"></div>			          
+			<button class="nav-item" data-page="events">
+			    🎪 Events
+			</button>
+            <div class="nav-separator"></div>
             <button class="nav-item" data-page="statistics">
                 📈 Statistiken
             </button>
@@ -70,10 +74,8 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- WICHTIG: Reihenfolge beachten! -->
-    <!-- 1. CRUD Manager müssen ZUERST geladen werden -->
+    <!-- Scripts: Reihenfolge beachten! -->
     <script src="./js/crud-managers.js"></script>
-    <!-- 2. Dann erst das Admin Interface -->
     <script src="./js/admin-interface.js"></script>
 </body>
 </html>
