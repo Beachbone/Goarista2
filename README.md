@@ -27,19 +27,19 @@ http://localhost:8080/pwa-service
 | Komponente | Status | Fortschritt |
 |------------|--------|-------------|
 | Backend REST API | ✅ Fertig | 100% |
-| Service-App (PWA) | ⚠️ Funktional | 85% |
+| Service-App (PWA) | ⚠️ Prototyp/Demo | ~30% |
 | Admin-Interface | ✅ Fast fertig | 95% |
 | Küchen-Display | 🔴 Offen | 0% |
 | Bestellstation | 🔴 Offen | 0% |
 
 ## 🎯 Features
 
-- ✅ **QR-Code basierte Bestellungen** - Gäste scannen Tisch-QR und bestellen per Smartphone
+- ✅ **QR-Code basierte Bestellungen** - Konzept für Gäste-Bestellungen per Smartphone (Prototyp)
 - ✅ **Event-Management** - Beschränke verfügbare Gerichte für spezielle Veranstaltungen
 - ✅ **Inventar-Tracking** - Automatische Bestandsverwaltung mit Warnungen
 - ✅ **Radio Groups** - Exklusive Auswahl-Gruppen (z.B. "1x ODER 2x Portion")
 - ✅ **Komplettgerichte & Einzelzutaten** - Flexible Menü-Gestaltung
-- ⚠️ **Echtzeit-Status** - Service-App mit Live-Updates (funktional)
+- ⚠️ **Service-App (PWA)** - UI-Prototyp vorhanden, Funktionalität ausstehend
 - 🔴 **Küchen-Display** - Bestellungsanzeige für Küche (geplant)
 - 🔴 **Bestellstation** - Touch-Interface für Kassenpersonal (geplant)
 
@@ -106,6 +106,7 @@ Goarista2/
 
 ### Voraussetzungen
 - FreePascal / Lazarus IDE (Backend)
+- ZEOS Database Objects 8.0+ (Backend)
 - Moderner Webbrowser (Frontend)
 - Optional: Linux für Deployment
 
@@ -152,9 +153,19 @@ Dieses Projekt ist aktuell in aktiver Entwicklung. Feedback und Vorschläge sind
 
 Siehe [LICENSE](LICENSE) Datei.
 
-## 👥 Kontakt
+## 📬 Kontakt & Support
 
-Erstellt für Schlachtfeste und ähnliche Veranstaltungen.
+**Fragen, Feedback oder Probleme?**
+
+- 💬 [GitHub Discussions](https://github.com/Beachbone/Goarista2/discussions) - Allgemeine Fragen und Diskussionen
+- 🐛 [GitHub Issues](https://github.com/Beachbone/Goarista2/issues) - Bug-Reports und Feature-Requests
+- 📧 Oder kontaktiere den Maintainer direkt über GitHub
+
+Bei Bug-Reports bitte folgende Informationen angeben:
+- Betriebssystem & Version
+- Browser (bei Frontend-Problemen)
+- Schritte zur Reproduktion
+- Erwartetes vs. aktuelles Verhalten
 
 ---
 
