@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layout Editor - Bestellstation</title>
+    <link rel="stylesheet" href="css/layout-editor.css?v=2">
+</head>
+<body>
+    <div class="editor-container">
+        <!-- Header -->
+        <header class="editor-header">
+            <div class="header-left">
+                <h1>🎨 Layout Editor - Bestellstation</h1>
+            </div>
+            <div class="header-right">
+                <button id="btnBack" class="btn btn-secondary">← Zurück zum Admin</button>
+                <button id="btnSave" class="btn btn-primary">💾 Speichern</button>
+            </div>
+        </header>
+
+        <!-- Main Editor Area - 3 SPALTEN -->
+        <div class="editor-main">
+            <!-- Linke Spalte - Event & Tab Config -->
+            <aside class="left-panel">
+                <h3>📋 Konfiguration</h3>
+                
+                <!-- Event Selection -->
+                <section class="config-section">
+                    <h4>Event auswählen</h4>
+                    <select id="eventSelect" class="full-width">
+                        <option value="">Lädt Events...</option>
+                    </select>
+                    <button id="btnLoadEvent" class="btn btn-primary full-width">Laden</button>
+                    <div id="eventInfo" class="event-info-box"></div>
+                </section>
+
+                <!-- Tab Names Configuration -->
+                <section class="config-section">
+                    <h4>Tab-Namen</h4>
+                    <div class="form-group-vertical">
+                        <label for="tab1Name">Tab 1:</label>
+                        <input type="text" id="tab1Name" value="Hauptgerichte" maxlength="30">
+                    </div>
+                    <div class="form-group-vertical">
+                        <label for="tab2Name">Tab 2:</label>
+                        <input type="text" id="tab2Name" value="Einzeln" maxlength="30">
+                    </div>
+                </section>
+
+                <!-- Setup-Hinweis -->
+                <section class="config-section setup-notice">
+                    <h4>⚠️ Setup erforderlich</h4>
+                    <p>Im Admin-Interface muss noch ein <strong>Setup-Bereich</strong> erstellt werden für:</p>
+                    <ul>
+                        <li>Canvas-Hintergrundfarbe</li>
+                        <li>Globale Theme-Einstellungen</li>
+                        <li>Drucker-Konfiguration</li>
+                        <li>Logo & Branding</li>
+                    </ul>
+                </section>
+            </aside>
+
+            <!-- Mittlere Spalte - Canvas -->
+            <div class="canvas-container">
+                <div class="canvas-tabs">
+                    <button class="tab-button active" data-tab="tab1">
+                        <span id="tab1Label">Hauptgerichte</span>
+                    </button>
+                    <button class="tab-button" data-tab="tab2">
+                        <span id="tab2Label">Einzeln</span>
+                    </button>
+                </div>
+                
+                <div class="canvas-wrapper">
+                    <div id="canvas" class="canvas">
+                        <!-- Buttons werden hier dynamisch eingefügt -->
+                    </div>
+                </div>
+
+                <div class="canvas-info">
+                    Canvas: <span id="canvasSize">675x570px</span> | 
+                    Buttons: <span id="buttonCount">0</span>
+                </div>
+            </div>
+
+            <!-- Rechte Spalte - Settings -->
+            <aside class="settings-panel">
+                <h3>⚙️ Einstellungen</h3>
+                
+                <div class="settings-group">
+                    <h4>Layout-Funktionen</h4>
+                    <button id="btnFormatCopy" class="btn btn-action">📋 Format übertragen</button>
+                    <p style="font-size: 13px; color: var(--text-secondary); font-style: italic; margin-top: 8px;">
+                        Snap-to-Grid ist beim Verschieben aktiv wenn aktiviert.
+                    </p>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Abstand</h4>
+                    <div class="input-group">
+                        <input type="number" id="spacingValue" value="5" min="0" max="50" step="1">
+                        <span>px</span>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Grid & Kollision</h4>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="snapToGrid" checked>
+                        <span>Snap-to-Grid</span>
+                    </label>
+                    <div class="input-group">
+                        <label>Raster:</label>
+                        <input type="number" id="gridSize" value="10" min="5" max="50" step="5">
+                        <span>px</span>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="collisionDetection" checked>
+                        <span>Kollisionserkennung</span>
+                    </label>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Button-Größe</h4>
+                    <div class="input-group">
+                        <label>Min. Größe:</label>
+                        <input type="number" id="minButtonSize" value="50" min="30" max="100" step="10">
+                        <span>px</span>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h4>Selektierter Button</h4>
+                    <div id="selectedButtonInfo">
+                        <p class="no-selection">Kein Button ausgewählt</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-left">
+                <span id="statusMessage">Bereit</span>
+            </div>
+            <div class="status-right">
+                <span id="unsavedChanges" class="hidden">● Ungespeicherte Änderungen</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal für Label bearbeiten -->
+    <div id="editLabelModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Button-Text bearbeiten</h3>
+            <input type="text" id="editLabelInput" maxlength="30" placeholder="Button-Beschriftung...">
+            <div class="modal-buttons">
+                <button id="btnCancelLabel" class="btn btn-secondary">Abbrechen</button>
+                <button id="btnSaveLabel" class="btn btn-primary">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WICHTIG: ?v=2 Cache-Busting -->
+    <script src="js/layout-editor.js?v=2"></script>
+</body>
+</html>
